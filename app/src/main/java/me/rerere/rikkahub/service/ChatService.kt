@@ -91,6 +91,7 @@ import me.rerere.rikkahub.data.ai.transformers.VoiceMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.WorkspaceReminderTransformer
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceShellStatus
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -414,6 +415,16 @@ class ChatService(
                     }
                 } catch (e: Exception) {
                     android.util.Log.w("ChatService", "Failed to reset proactive timer", e)
+                }
+
+                // 用户发送消息时重置心跳计时器 (独立于主动消息)
+                try {
+                    val heartbeatSetting = settings.heartbeatSetting
+                    if (heartbeatSetting.enabled) {
+                        me.rerere.rikkahub.data.service.HeartbeatService.resetTimer(context, heartbeatSetting)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("ChatService", "Failed to reset heartbeat timer", e)
                 }
 
                 // 读取最新状态 -> 追加用户消息 -> 落库，整体加锁。
@@ -1554,6 +1565,20 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
     }
 
     // ---- 翻译消息 ----
+
+    /**
+     * 翻译任意文本, 返回 Flow<String> 的流式翻译结果.
+     * 供 VoiceCallService 等非 UI 场景调用.
+     */
+    fun translateTextFlow(
+        settings: Settings,
+        sourceText: String,
+        targetLanguage: Locale
+    ) = generationHandler.translateText(
+        settings = settings,
+        sourceText = sourceText,
+        targetLanguage = targetLanguage
+    )
 
     fun translateMessage(
         conversationId: Uuid,

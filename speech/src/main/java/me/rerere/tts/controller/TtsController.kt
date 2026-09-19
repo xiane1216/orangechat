@@ -28,7 +28,6 @@ import me.rerere.tts.model.PlaybackStatus
 import me.rerere.tts.model.TTSResponse
 import me.rerere.tts.provider.TTSManager
 import me.rerere.tts.provider.TTSProviderSetting
-import java.util.UUID
 
 private const val TAG = "TtsController"
 
@@ -54,10 +53,14 @@ class TtsController(
     private var workerJob: Job? = null
     private var isPaused = false
 
-    // 队列与缓存（基于稳定 ID）
+    // 队列与缓存
+    // 缓存 key 改为文本内容: 同一段文字无论被 enqueue 多少次, 只合成一次, 避免重复请求.
     private val queue: java.util.concurrent.ConcurrentLinkedQueue<TtsChunk> = java.util.concurrent.ConcurrentLinkedQueue()
     private val allChunks: MutableList<TtsChunk> = mutableListOf()
-    private val cache = java.util.concurrent.ConcurrentHashMap<UUID, kotlinx.coroutines.Deferred<TTSResponse>>()
+    private val cache = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<TTSResponse>>()
+    // 已入队的文本集合, 用于内容级去重: 同一段文字不会被重复加入播放队列.
+    private val queuedTexts: java.util.concurrent.ConcurrentHashMap.KeySetView<String, Boolean> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
     private var lastPrefetchedIndex: Int = -1
 
     // 行为参数
@@ -124,15 +127,22 @@ class TtsController(
 
         if (flush) {
             internalReset()
-            allChunks.addAll(newChunks)
-            queue.addAll(newChunks)
+        }
+
+        // 内容级去重: 跳过文本已经在队列中的 chunk, 避免同一段文字被重复合成/播放.
+        val dedupedChunks = newChunks.filter { chunk ->
+            queuedTexts.add(chunk.text) // add 返回 true 表示之前不存在, 即未重复
+        }
+        if (dedupedChunks.isEmpty()) return
+
+        // 追加时，重映射 index 以保持全局顺序
+        val startIndex = (allChunks.lastOrNull()?.index ?: -1) + 1
+        val remapped = dedupedChunks.mapIndexed { i, c -> c.copy(index = startIndex + i) }
+        allChunks.addAll(remapped)
+        queue.addAll(remapped)
+
+        if (flush) {
             _currentChunk.update { 0 }
-        } else {
-            // 追加时，重映射 index 以保持全局顺序
-            val startIndex = (allChunks.lastOrNull()?.index ?: -1) + 1
-            val remapped = newChunks.mapIndexed { i, c -> c.copy(index = startIndex + i) }
-            allChunks.addAll(remapped)
-            queue.addAll(remapped)
         }
         _totalChunks.update { queue.size }
         _error.update { null }
@@ -157,6 +167,7 @@ class TtsController(
         isPaused = false
         queue.clear()
         allChunks.clear()
+        queuedTexts.clear()
         cache.values.forEach { it.cancel(CancellationException("Reset")) }
         cache.clear()
         lastPrefetchedIndex = -1
@@ -207,6 +218,7 @@ class TtsController(
         isPaused = false
         queue.clear()
         allChunks.clear()
+        queuedTexts.clear()
         cache.values.forEach { it.cancel(CancellationException("Stopped")) }
         cache.clear()
         lastPrefetchedIndex = -1
@@ -296,7 +308,8 @@ class TtsController(
 
         for (i in begin until endExclusive) {
             val chunk = allChunks.getOrNull(i) ?: continue
-            cache.computeIfAbsent(chunk.id) {
+            // 缓存 key 用文本内容: 同一段文字只合成一次, 即使来自不同 chunk 实例.
+            cache.computeIfAbsent(chunk.text) {
                 scope.async(Dispatchers.IO) { synthesizer.synthesize(provider, chunk) }
             }
         }
@@ -304,7 +317,7 @@ class TtsController(
     }
 
     private suspend fun awaitOrCreate(chunk: TtsChunk, provider: TTSProviderSetting): TTSResponse {
-        val deferred = cache.computeIfAbsent(chunk.id) {
+        val deferred = cache.computeIfAbsent(chunk.text) {
             scope.async(Dispatchers.IO) { synthesizer.synthesize(provider, chunk) }
         }
         return try {

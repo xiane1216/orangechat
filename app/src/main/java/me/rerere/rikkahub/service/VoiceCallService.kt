@@ -28,6 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
@@ -96,8 +97,15 @@ class VoiceCallService : Service(), KoinComponent {
     // 流式 TTS: 记录已发送给 TTS 的文本长度
     private var ttsSentLength: Int = 0
 
+    // 跟踪当前 AI 消息的 ID, 当消息切换(如工具调用后新消息)时重置 ttsSentLength
+    private var lastMessageId: kotlin.uuid.Uuid? = null
+
     // 静音状态 (独立于 _uiState.isMuted, 检测循环里直接读这个字段更快)
     private var isMuted: Boolean = false
+
+    // 翻译任务
+    private var translationJob: Job? = null
+    private var lastTranslatedText: String = ""
 
     companion object {
         private val _activeConversationId = MutableStateFlow<String?>(null)
@@ -264,6 +272,7 @@ class VoiceCallService : Service(), KoinComponent {
         lastSpokenText = ""
         hasSentCurrentMessage = false
         ttsSentLength = 0
+        lastMessageId = null
         isMuted = false
 
         _uiState.update {
@@ -271,7 +280,10 @@ class VoiceCallService : Service(), KoinComponent {
                 status = VoiceCallStatus.Listening,
                 userTranscript = "",
                 errorMessage = null,
-                isMuted = false
+                isMuted = false,
+                toolCallInfo = null,
+                callStartTime = System.currentTimeMillis(),
+                subtitleHistory = emptyList(),
             )
         }
 
@@ -303,15 +315,25 @@ class VoiceCallService : Service(), KoinComponent {
         tts.stop()
         ttsSentLength = 0
         lastAssistantText = ""
+        lastMessageId = null
         hasSentCurrentMessage = false
+        lastTranslatedText = ""
+        translationJob?.cancel()
 
         _uiState.update {
             it.copy(
                 status = VoiceCallStatus.Listening,
                 userTranscript = "",
-                errorMessage = null
+                assistantTranslation = "",
+                errorMessage = null,
+                toolCallInfo = null
             )
         }
+
+        // 清空 ASR 内部累积的转写文本.
+        // ASR 贯穿全程不重启, 但每一轮对话开始时必须把上一轮的文字清掉,
+        // 否则 publishTranscript 会把历史一起拼出来 (说"2"显示"12").
+        asr.resetTranscript()
 
         // 停止"打断检测"协程 (Speaking 状态才需要它)
         interruptDetectJob?.cancel()
@@ -342,9 +364,11 @@ class VoiceCallService : Service(), KoinComponent {
             var lastTranscript = ""
             var silenceStartTime: Long = 0L
             var lastAmplitudeTime: Long = System.currentTimeMillis()
-            val silenceThresholdMs = 800L
-            val minTranscriptLength = 2
-            val amplitudeTimeoutMs = 2000L
+            val silenceThresholdMs = 1500L
+            val minTranscriptLength = 1 // 降低到 1, 避免短回复发不出去
+            val amplitudeTimeoutMs = 3000L
+            val maxListenMs = 120_000L // 最长听 2 分钟, 避免 ASR 异常时永远卡在 Listening
+            val vadStartTime = System.currentTimeMillis()
 
             while (true) {
                 delay(100)
@@ -383,6 +407,14 @@ class VoiceCallService : Service(), KoinComponent {
                         break
                     }
                 }
+
+                // 超时保护: 听了 2 分钟还没触发, 重置 ASR 重来
+                if (System.currentTimeMillis() - vadStartTime > maxListenMs) {
+                    Log.w(TAG, "VAD max listen time exceeded, resetting ASR")
+                    asr.resetTranscript()
+                    _uiState.update { it.copy(userTranscript = "") }
+                    break
+                }
             }
         }
     }
@@ -404,11 +436,20 @@ class VoiceCallService : Service(), KoinComponent {
         _uiState.update {
             it.copy(
                 status = VoiceCallStatus.Processing,
-                assistantText = ""
+                assistantText = "",
+                assistantTranslation = "",
+                toolCallInfo = null,
+                subtitleHistory = (it.subtitleHistory + me.rerere.rikkahub.ui.pages.voice.SubtitleEntry(
+                    role = me.rerere.rikkahub.ui.pages.voice.SubtitleRole.User,
+                    text = transcript,
+                    isAssistant = false,
+                )).takeLast(100),
             )
         }
         ttsSentLength = 0
         lastAssistantText = ""
+        lastMessageId = null
+        lastTranslatedText = ""
 
         try {
             chatService.sendMessage(
@@ -441,26 +482,64 @@ class VoiceCallService : Service(), KoinComponent {
         conversationMonitorJob = serviceScope.launch {
             conversation.collect { conv ->
                 if (_uiState.value.status != VoiceCallStatus.Processing &&
-                    _uiState.value.status != VoiceCallStatus.Speaking
+                    _uiState.value.status != VoiceCallStatus.Speaking &&
+                    _uiState.value.status != VoiceCallStatus.Working
                 ) return@collect
 
                 val lastMessage = conv.currentMessages.lastOrNull()
                 if (lastMessage?.role != MessageRole.ASSISTANT) return@collect
 
-                val currentText = lastMessage.toText()
+                // 检测消息切换: 工具调用后可能产生新的 ASSISTANT 消息
+                if (lastMessage.id != lastMessageId) {
+                    lastMessageId = lastMessage.id
+                    ttsSentLength = 0
+                    lastAssistantText = ""
+                }
+
+                val currentText = extractVoiceText(lastMessage)
+
+                // 检测工具调用状态:
+                // - ToolCall: AI 正在生成工具调用 (流式过程中)
+                // - Tool: 工具已创建但未执行完 (isExecuted = false)
+                val pendingToolCall = lastMessage.parts
+                    .filterIsInstance<UIMessagePart.ToolCall>()
+                    .firstOrNull()
+                val pendingTool = lastMessage.getTools().firstOrNull { !it.isExecuted }
+                val toolInfo = pendingToolCall?.toolName ?: pendingTool?.toolName
+                if (toolInfo != null) {
+                    _uiState.update {
+                        it.copy(
+                            toolCallInfo = "正在使用工具：$toolInfo...",
+                            status = VoiceCallStatus.Working,
+                        )
+                    }
+                } else if (_uiState.value.toolCallInfo != null) {
+                    // 工具调用完成, 清除提示, 恢复到 Processing 等待文本
+                    _uiState.update {
+                        it.copy(
+                            toolCallInfo = null,
+                            status = VoiceCallStatus.Processing,
+                        )
+                    }
+                }
 
                 // 更新 UI 显示的 AI 回复
                 _uiState.update { it.copy(assistantText = currentText) }
+
+                // 流式翻译: 检测英文并翻译为中文
+                maybeTranslate(currentText)
 
                 // 流式 TTS: 只朗读新增的部分
                 if (currentText.length > ttsSentLength) {
                     val newText = currentText.substring(ttsSentLength)
                     // 按句子分割, 朗读完整句子
                     val sentences = extractCompleteSentences(newText)
-                    for (sentence in sentences) {
-                        if (sentence.isNotBlank()) {
-                            tts.enqueueText(sentence)
-                            Log.d(TAG, "Streaming TTS: $sentence")
+                    // 批量发送: 把多个句子合并成一次 enqueueText, 减少网络请求次数, 降低卡顿
+                    if (sentences.isNotEmpty()) {
+                        val batchedText = sentences.filter { it.isNotBlank() }.joinToString("")
+                        if (batchedText.isNotBlank()) {
+                            tts.enqueueText(batchedText)
+                            Log.d(TAG, "Streaming TTS (batched ${sentences.size} sentences): $batchedText")
                         }
                     }
                     ttsSentLength = currentText.length - getPendingRemainder(newText).length
@@ -468,7 +547,10 @@ class VoiceCallService : Service(), KoinComponent {
 
                 // 一旦 AI 有内容输出, 立即切换到 Speaking 状态
                 // 这样用户随时可以打断, UI 反馈更即时
-                if (_uiState.value.status == VoiceCallStatus.Processing && currentText.isNotBlank()) {
+                if ((_uiState.value.status == VoiceCallStatus.Processing ||
+                        _uiState.value.status == VoiceCallStatus.Working) &&
+                    currentText.isNotBlank()
+                ) {
                     _uiState.update { it.copy(status = VoiceCallStatus.Speaking) }
                     startInterruptDetection()
                 }
@@ -487,16 +569,78 @@ class VoiceCallService : Service(), KoinComponent {
         }
     }
 
+    /**
+     * 检测 AI 文本是否包含英文, 如果包含则异步翻译为中文.
+     * 只在文本包含拉丁字母且不是纯中文时触发.
+     */
+    private fun maybeTranslate(text: String) {
+        if (text.isBlank() || text == lastTranslatedText) return
+        // 检测是否包含英文字母
+        val hasEnglish = text.any { it in 'a'..'z' || it in 'A'..'Z' }
+        if (!hasEnglish) {
+            _uiState.update { it.copy(assistantTranslation = "") }
+            return
+        }
+        // 流式节流: 文本增长不足 10 字符时跳过, 避免每个 token 都发翻译请求
+        if (text.length - lastTranslatedText.length < 10) return
+        lastTranslatedText = text
+
+        translationJob?.cancel()
+        translationJob = serviceScope.launch(Dispatchers.IO) {
+            try {
+                val settings = settingsStore.settingsFlow.first()
+                val finalText = text
+                chatService.translateTextFlow(
+                    settings = settings,
+                    sourceText = finalText,
+                    targetLanguage = java.util.Locale.CHINESE
+                ).collect { translated ->
+                    _uiState.update { it.copy(assistantTranslation = translated) }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "翻译失败", e)
+            }
+        }
+    }
+
     private suspend fun onGenerationDone() {
-        // 朗读最后剩余的文本
+        // 朗读最后剩余的文本 (防重: 只在还有未朗读内容时发送)
         val finalText = _uiState.value.assistantText
+
+        // 取消流式翻译协程, 防止它在我们清空字段后又写回 assistantTranslation
+        translationJob?.cancel()
+        lastTranslatedText = ""
+
+        // 先做最终翻译并等待完成, 确保历史记录里保存的是完整翻译
+        val finalTranslation = runCatching {
+            translateTextSync(finalText)
+        }.getOrDefault("")
+
+        // 将 AI 回复加入字幕历史 (带完整翻译), 同时清空实时字幕字段,
+        // 避免历史条目和 LiveSubtitle 同时显示同一份内容导致重复.
+        if (finalText.isNotBlank()) {
+            _uiState.update {
+                it.copy(
+                    subtitleHistory = (it.subtitleHistory + me.rerere.rikkahub.ui.pages.voice.SubtitleEntry(
+                        role = me.rerere.rikkahub.ui.pages.voice.SubtitleRole.Assistant,
+                        text = finalText,
+                        translation = finalTranslation,
+                        isAssistant = true,
+                    )).takeLast(100),
+                    assistantText = "",
+                    assistantTranslation = "",
+                )
+            }
+        }
+
         if (finalText.length > ttsSentLength) {
             val remaining = finalText.substring(ttsSentLength)
             if (remaining.isNotBlank()) {
                 tts.enqueueText(remaining)
-                ttsSentLength = finalText.length
             }
         }
+        // 无论是否发送, 都标记为已全部朗读, 防止重复
+        ttsSentLength = finalText.length
 
         _uiState.update { it.copy(status = VoiceCallStatus.Speaking) }
         startInterruptDetection()
@@ -508,50 +652,102 @@ class VoiceCallService : Service(), KoinComponent {
         }
     }
 
+    /**
+     * 同步翻译文本 (挂起等待结果).
+     * 用于生成完成后把完整翻译存入字幕历史.
+     */
+    private suspend fun translateTextSync(text: String): String {
+        if (text.isBlank()) return ""
+        val hasEnglish = text.any { it in 'a'..'z' || it in 'A'..'Z' }
+        if (!hasEnglish) return ""
+        return try {
+            val settings = settingsStore.settingsFlow.first()
+            var result = ""
+            chatService.translateTextFlow(
+                settings = settings,
+                sourceText = text,
+                targetLanguage = java.util.Locale.CHINESE
+            ).collect { translated ->
+                result = translated
+            }
+            result
+        } catch (e: Exception) {
+            Log.e(TAG, "同步翻译失败", e)
+            ""
+        }
+    }
+
     private suspend fun waitForTtsToFinish() {
-        // 等待 TTS 开始播放
+        // 阶段 1: 等待 TTS 开始播放 (最多 10 秒, 给网络生成留足时间)
         var waitStart = System.currentTimeMillis()
-        while (!tts.isSpeaking.value && System.currentTimeMillis() - waitStart < 5000) {
+        while (!tts.isSpeaking.value && System.currentTimeMillis() - waitStart < 10_000) {
             delay(100)
         }
-        // 等待 TTS 播放完成.
-        // 不能只靠 isSpeaking: 它在 worker 的 finally 里才会变 false,
-        // 一旦 worker 挂在网络请用/音频播放上 (isSpeaking 永远 true),
-        // 这里就死循环, 通话永远卡在 "正在传达".
-        // 改用 "活动超时": 跟踪 TTS 最后一次处于活动状态的时间,
-        // 连续 5 秒没有新的播放活动(不是 Playing/Buffering 且 isSpeaking 为 false)
-        // 就认为说完了. 另勠 5 分钟硬截止兜底.
-        val idleTimeoutMs = 5_000L
-        val hardDeadlineMs = 300_000L
+
+        // 阶段 2: 等待 TTS 播放完成
+        // 核心策略: 监听 playbackState 的状态变化, 而不是靠固定超时
+        // - Playing / Buffering: 正在播放或缓冲中, 继续等
+        // - Ended: 播放完成, 正常退出
+        // - Error: 播放出错, 退出
+        // - Idle: 如果之前播放过然后变 Idle, 说明完成了
+        // 超时兜底: 90 秒硬截止 (超长回复 + 网络慢)
+        val hardDeadlineMs = 90_000L
         val startTime = System.currentTimeMillis()
-        var lastActiveTime = System.currentTimeMillis()
+        var hasStartedPlaying = false
+
         while (true) {
             val now = System.currentTimeMillis()
             val status = tts.playbackState.value.status
-            val active = tts.isSpeaking.value ||
-                status == me.rerere.tts.model.PlaybackStatus.Playing ||
-                status == me.rerere.tts.model.PlaybackStatus.Buffering
-            if (active) {
-                lastActiveTime = now
+
+            when (status) {
+                me.rerere.tts.model.PlaybackStatus.Playing,
+                me.rerere.tts.model.PlaybackStatus.Buffering -> {
+                    hasStartedPlaying = true
+                }
+                me.rerere.tts.model.PlaybackStatus.Ended,
+                me.rerere.tts.model.PlaybackStatus.Error -> {
+                    // 播放完成或出错
+                    Log.d(TAG, "TTS finished with status: $status")
+                    break
+                }
+                me.rerere.tts.model.PlaybackStatus.Idle -> {
+                    if (hasStartedPlaying) {
+                        // 之前播放过, 现在变 Idle → 播完了
+                        Log.d(TAG, "TTS finished (Idle after playing)")
+                        break
+                    }
+                    // 还没开始播放, 继续等
+                }
+                me.rerere.tts.model.PlaybackStatus.Paused -> {
+                    // 暂停状态, 等待恢复
+                }
             }
-            // 连续 idleTimeoutMs 没活动 → 说完了
-            if (!active && now - lastActiveTime >= idleTimeoutMs) {
-                break
-            }
-            // 硬截止兜底 (TTS 真卡死)
+
+            // 硬截止兜底
             if (now - startTime > hardDeadlineMs) {
-                Log.w(TAG, "TTS 播放超过 5 分钟未结束, 强制停止以防卡死")
-                tts.stop()
+                Log.w(TAG, "TTS playback exceeded ${hardDeadlineMs}ms, force stopping")
                 break
             }
-            delay(300)
+            delay(150)
         }
-        // 额外等待状态更新
-        delay(300)
+
+        // 不在这里调用 tts.stop() — 让 startListening() 负责清理 TTS 状态,
+        // 避免在 TTS 还有残余音频时被强制截断.
     }
 
     /**
-     * 从增量文本中提取完整的句子 (以句号/问号/感叹号/换行结尾)
+     * 从消息中提取纯文本用于语音朗读.
+     * 不使用 toText() 的 \n 分隔符, 因为 \n 会被 extractCompleteSentences
+     * 当作句子结尾, 导致 ttsSentLength 跟踪错位, 产生重复朗读.
+     */
+    private fun extractVoiceText(message: me.rerere.ai.ui.UIMessage): String {
+        return message.parts
+            .filterIsInstance<UIMessagePart.Text>()
+            .joinToString("") { it.text }
+    }
+
+    /**
+     * 从增量文本中提取完整的句子 (以句号/问号/感叹号结尾, 不含换行)
      */
     private fun extractCompleteSentences(text: String): List<String> {
         val result = mutableListOf<String>()
@@ -559,7 +755,7 @@ class VoiceCallService : Service(), KoinComponent {
         for (char in text) {
             current.append(char)
             if (char == '。' || char == '？' || char == '！' || char == '.' ||
-                char == '?' || char == '!' || char == '\n'
+                char == '?' || char == '!'
             ) {
                 val sentence = current.toString().trim()
                 if (sentence.isNotEmpty()) {
@@ -577,7 +773,7 @@ class VoiceCallService : Service(), KoinComponent {
      */
     private fun getPendingRemainder(text: String): String {
         val lastSentenceEnd =
-            text.lastIndexOfAny(charArrayOf('。', '？', '！', '.', '?', '!', '\n'))
+            text.lastIndexOfAny(charArrayOf('。', '？', '！', '.', '?', '!'))
         return if (lastSentenceEnd >= 0 && lastSentenceEnd < text.length - 1) {
             text.substring(lastSentenceEnd + 1)
         } else if (lastSentenceEnd < 0) {
@@ -705,6 +901,16 @@ class VoiceCallService : Service(), KoinComponent {
     }
 
     /**
+     * 重播指定文字的语音 (字幕历史的"重播语音"按钮)
+     */
+    fun replayText(text: String) {
+        if (text.isBlank()) return
+        tts.enqueueText(text)
+        _uiState.update { it.copy(status = VoiceCallStatus.Speaking) }
+        startInterruptDetection()
+    }
+
+    /**
      * 挂断 / 结束通话.
      * 额外复位 _activeConversationId 和移除前台通知.
      */
@@ -717,7 +923,7 @@ class VoiceCallService : Service(), KoinComponent {
         asr.stop()
         tts.stop()
         _uiState.update {
-            it.copy(status = VoiceCallStatus.Idle)
+            it.copy(status = VoiceCallStatus.Idle, toolCallInfo = null)
         }
         _activeConversationId.value = null
         try {
@@ -741,6 +947,7 @@ class VoiceCallService : Service(), KoinComponent {
         val contentText = when (state.status) {
             VoiceCallStatus.Listening -> "正在聆听..."
             VoiceCallStatus.Processing -> "正在思考..."
+            VoiceCallStatus.Working -> "正在使用工具..."
             VoiceCallStatus.Speaking -> "正在说话..."
             VoiceCallStatus.Error -> state.errorMessage ?: "通话出错"
             VoiceCallStatus.Idle -> "通话中"

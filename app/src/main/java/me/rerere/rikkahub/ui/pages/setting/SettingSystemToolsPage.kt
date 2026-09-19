@@ -1211,6 +1211,71 @@ fun SettingSystemToolsPage(vm: SettingVM = koinViewModel()) {
             }
             }
 
+            // 萤石云监控
+            item {
+            CardGroup(
+                title = { Text("萤石云监控") },
+                modifier = Modifier.padding(horizontal = 8.dp)
+            ) {
+                item(
+                    leadingContent = { Icon(imageVector = HugeIcons.Camera01, contentDescription = null) },
+                    headlineContent = { Text("启用萤石监控工具") },
+                    supportingContent = { Text("允许 AI 调用 ezviz_capture 工具抓取萤石摄像头实时画面截图并识别（看宝宝在干嘛）。需在萤石开放平台注册开发者并添加设备。") },
+                    trailingContent = {
+                        Switch(
+                            checked = systemToolsSetting.ezvizEnabled,
+                            onCheckedChange = { enabled -> updateSystemToolsSetting(systemToolsSetting.copy(ezvizEnabled = enabled)) }
+                        )
+                    }
+                )
+                if (systemToolsSetting.ezvizEnabled) {
+                    item(
+                        headlineContent = { Text("AppKey") },
+                        supportingContent = {
+                            TextField(
+                                value = systemToolsSetting.ezvizAppKey,
+                                onValueChange = { key -> updateSystemToolsSetting(systemToolsSetting.copy(ezvizAppKey = key)) },
+                                placeholder = { Text("萤石开放平台 AppKey") },
+                                modifier = Modifier.fillMaxSize(), singleLine = true,
+                                shape = MaterialTheme.shapes.small,
+                                colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
+                            )
+                        }
+                    )
+                    item(
+                        headlineContent = { Text("AppSecret") },
+                        supportingContent = {
+                            TextField(
+                                value = systemToolsSetting.ezvizAppSecret,
+                                onValueChange = { key -> updateSystemToolsSetting(systemToolsSetting.copy(ezvizAppSecret = key)) },
+                                placeholder = { Text("萤石开放平台 AppSecret") },
+                                modifier = Modifier.fillMaxSize(), singleLine = true,
+                                shape = MaterialTheme.shapes.small,
+                                colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
+                            )
+                        }
+                    )
+                    item(
+                        headlineContent = { Text("设备序列号（可选）") },
+                        supportingContent = {
+                            TextField(
+                                value = systemToolsSetting.ezvizDeviceSerial,
+                                onValueChange = { s -> updateSystemToolsSetting(systemToolsSetting.copy(ezvizDeviceSerial = s)) },
+                                placeholder = { Text("不填则自动取账号下第一个在线设备") },
+                                modifier = Modifier.fillMaxSize(), singleLine = true,
+                                shape = MaterialTheme.shapes.small,
+                                colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
+                            )
+                        }
+                    )
+                    item(
+                        headlineContent = { Text("说明") },
+                        supportingContent = { Text("1. 前往 open.ys7.com 注册开发者账号并创建应用获取 AppKey/AppSecret\n2. 在「我的设备」中添加你的萤石摄像头\n3. 工具调用萤石抓拍接口获取实时截图，AI 通过视觉模型识别画面内容\n4. 每个摄像头最小调用间隔 4 秒") }
+                    )
+                }
+            }
+            }
+
 
         }
 

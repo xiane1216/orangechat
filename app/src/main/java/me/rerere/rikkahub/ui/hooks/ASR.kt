@@ -96,6 +96,12 @@ interface CustomAsrState {
     fun start(onTranscriptChange: (String) -> Unit)
     fun stop()
     fun cleanup()
+
+    /**
+     * 清空已累积的转写文本. 每一轮对话 (用户说完→AI回复→回到聆听) 开始时调用,
+     * 避免上一轮的文字被拼到下一轮里 (说"2"却显示"12").
+     */
+    fun resetTranscript()
 }
  
 internal class CustomAsrStateImpl(
@@ -177,6 +183,14 @@ internal class CustomAsrStateImpl(
             audioManager.abandonAudioFocusRequest(audioFocusRequest)
         } catch (e: Exception) {
             Log.e(ASR_TAG, "cleanup: abandonAudioFocusRequest 失败", e)
+        }
+    }
+
+    override fun resetTranscript() {
+        try {
+            controller?.resetTranscript()
+        } catch (e: Exception) {
+            Log.e(ASR_TAG, "resetTranscript: 清空转写失败", e)
         }
     }
  

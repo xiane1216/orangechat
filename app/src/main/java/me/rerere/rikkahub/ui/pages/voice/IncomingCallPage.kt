@@ -161,8 +161,8 @@ fun IncomingCallPage(
             // 中部: 来电光球 (脉动)
             VoiceOrb(
                 amplitudes = emptyList(),
-                status = VoiceCallStatus.Processing, // 借用琥珀色脉动节奏
-                baseColor = accentColor,
+                status = VoiceCallStatus.Processing,
+                isDarkMode = true,
                 size = 220.dp,
                 modifier = Modifier
                 // VoiceOrb 内部已有呼吸动画, 这里再叠一层脉动缩放会更生动,

@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,12 +45,20 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.Collections
+import java.util.concurrent.TimeUnit
 
 private const val TAG = "MiMoASR"
 
 // MiMo 官方限制: 单次请求 base64 不超过 10MB ≈ 7.5MB raw。
 // 16kHz / 16bit / mono 下 7.5MB ≈ 234 秒。提前在 6MB 触发自动 flush 留余量。
 private const val MAX_SEGMENT_BYTES = 6 * 1024 * 1024
+// 缓冲区上限: 服务器慢时音频会堆积, 超过这个值就丢弃最旧的部分,
+// 避免单次上传几十秒音频导致进一步超时. 约 15 秒 @16kHz/16bit/mono.
+private const val MAX_BUFFER_BYTES = 15 * 16_000 * 2
+// 静音检测: 连续 250ms 音量低于阈值就提前 flush, 让用户停顿时最后一句话
+// 能被快速识别, 不必等满分段时长。
+private const val SILENCE_FLUSH_MS = 250L
+private const val SILENCE_AMPLITUDE_THRESHOLD = 0.03f
 
 /**
  * 小米 MiMo ASR Controller。
@@ -68,6 +77,13 @@ class MiMoASRController(
 ) : ASRController {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    // ASR 专用 OkHttpClient: 短超时, 避免服务器慢时阻塞整个转写.
+    private val asrHttpClient = httpClient.newBuilder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
+
     private val _state = MutableStateFlow(ASRState(isAvailable = true))
     override val state: StateFlow<ASRState> = _state.asStateFlow()
 
@@ -75,8 +91,10 @@ class MiMoASRController(
     private var audioRecord: AudioRecord? = null
     private var onTranscriptChange: ((String) -> Unit)? = null
 
-    // 同一时刻只允许一个 flush 协程在跑, 避免乱序拼结果
-    private var flushJob: Job? = null
+    // conflated Channel: 消费者串行处理, 处理期间来的信号合并为一个,
+    // 处理完立即再 flush, 不会像旧实现那样丢弃导致音频无限堆积.
+    private val flushSignal = Channel<Unit>(Channel.CONFLATED)
+    private var flushConsumerJob: Job? = null
 
     private val bufferLock = Any()
     private var currentBuffer = ByteArrayOutputStream()
@@ -100,7 +118,16 @@ class MiMoASRController(
             segmentStartElapsedMs = SystemClock.elapsedRealtime()
         }
         completedTranscripts.clear()
-        flushJob = null
+
+        // 启动 flush 消费者: 串行处理 channel 信号, 处理期间的信号被 conflate,
+        // 处理完立即再 flush 一次 (把堆积音频发出去), 不会丢失.
+        flushConsumerJob?.cancel()
+        flushConsumerJob = scope.launch(Dispatchers.IO) {
+            for (signal in flushSignal) {
+                runCatching { flushSegment() }
+                    .onFailure { Log.e(TAG, "Segment flush failed", it) }
+            }
+        }
 
         // MiMo 是 HTTP 一次性接口, 没有 WebSocket 连接阶段, 直接进入 Listening
         _state.update {
@@ -117,16 +144,16 @@ class MiMoASRController(
         releaseRecorder()
         _state.update { it.copy(status = ASRStatus.Stopping) }
 
-        // 把剩余 PCM 做最后一次 flush, 完成后切回 Idle
+        // 录音已停, 缓冲区不再增长. 直接 flush 最后一段, 然后取消消费者.
         scope.launch(Dispatchers.IO) {
             try {
-                // 等当前正在跑的 flushJob 完成, 避免并发 flush 导致结果乱序
-                flushJob?.join()
                 flushSegment()
             } catch (e: Exception) {
                 Log.e(TAG, "Final flush failed", e)
                 setError(e.message ?: "MiMo ASR final flush failed")
             } finally {
+                flushConsumerJob?.cancel()
+                flushConsumerJob = null
                 _state.update { it.copy(status = ASRStatus.Idle) }
             }
         }
@@ -134,9 +161,16 @@ class MiMoASRController(
 
     override fun dispose() {
         recorderJob?.cancel()
-        flushJob?.cancel()
+        flushConsumerJob?.cancel()
+        flushSignal.close()
         releaseRecorder()
         scope.cancel()
+    }
+
+    override fun resetTranscript() {
+        completedTranscripts.clear()
+        _state.update { it.copy(transcript = "") }
+        scope.launch { onTranscriptChange?.invoke("") }
     }
 
     @SuppressLint("MissingPermission")
@@ -166,25 +200,44 @@ class MiMoASRController(
                 recorder.startRecording()
                 val buffer = ByteArray(bufferSize)
                 val segmentMs = provider.segmentDurationSec.coerceAtLeast(0) * 1000L
+                var lastSpeechTime = SystemClock.elapsedRealtime()
                 while (isActive) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
                         val amplitude = calculateRmsAmplitude(buffer, read)
                         _state.update { it.copy(amplitudes = it.amplitudes.appendAmplitude(amplitude)) }
 
+                        val now = SystemClock.elapsedRealtime()
+                        if (amplitude > SILENCE_AMPLITUDE_THRESHOLD) {
+                            lastSpeechTime = now
+                        }
+
                         val shouldFlush = synchronized(bufferLock) {
                             currentBuffer.write(buffer, 0, read)
-                            if (segmentMs <= 0) {
-                                currentBuffer.size() >= MAX_SEGMENT_BYTES
-                            } else {
-                                val elapsed = SystemClock.elapsedRealtime() - segmentStartElapsedMs
-                                currentBuffer.size() >= MAX_SEGMENT_BYTES || elapsed >= segmentMs
+                            // 缓冲区上限保护: 服务器慢导致堆积时, 丢弃最旧的音频,
+                            // 只保留最近 MAX_BUFFER_BYTES, 防止单次上传超大片段.
+                            if (currentBuffer.size() > MAX_BUFFER_BYTES) {
+                                val kept = currentBuffer.toByteArray()
+                                    .takeLast(MAX_BUFFER_BYTES)
+                                    .toByteArray()
+                                currentBuffer = ByteArrayOutputStream()
+                                currentBuffer.write(kept)
                             }
+                            val elapsed = now - segmentStartElapsedMs
+                            val silentFor = now - lastSpeechTime
+                            val timeUp = segmentMs > 0 && elapsed >= segmentMs
+                            currentBuffer.size() >= MAX_SEGMENT_BYTES ||
+                                timeUp ||
+                                (silentFor >= SILENCE_FLUSH_MS && currentBuffer.size() > 0)
                         }
 
                         if (shouldFlush) {
-                            // 用单独协程异步 flush, 不阻塞录音主循环
+                            // 立即重置分段计时, 避免消费者处理期间 shouldFlush 持续为 true.
+                            synchronized(bufferLock) {
+                                segmentStartElapsedMs = SystemClock.elapsedRealtime()
+                            }
                             triggerFlush()
+                            lastSpeechTime = SystemClock.elapsedRealtime()
                         }
                     } else if (read < 0) {
                         throw IllegalStateException("AudioRecord read error: $read")
@@ -200,12 +253,9 @@ class MiMoASRController(
     }
 
     private fun triggerFlush() {
-        // 同一时刻只跑一个 flush, 避免后发先至导致结果乱序
-        if (flushJob?.isActive == true) return
-        flushJob = scope.launch(Dispatchers.IO) {
-            runCatching { flushSegment() }
-                .onFailure { Log.e(TAG, "Segment flush failed", it) }
-        }
+        // 往 conflated channel 发信号. 消费者正在处理时信号被合并,
+        // 处理完立即再 flush 一次, 不会丢弃导致音频堆积.
+        flushSignal.trySend(Unit)
     }
 
     /**
@@ -258,7 +308,7 @@ class MiMoASRController(
             .build()
 
         val text = withContext(Dispatchers.IO) {
-            httpClient.newCall(request).execute().use { resp ->
+            asrHttpClient.newCall(request).execute().use { resp ->
                 val respBody = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
                     throw IOException("MiMo ASR HTTP ${resp.code}: $respBody")

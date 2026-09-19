@@ -113,7 +113,8 @@ sealed class ASRProviderSetting {
         // 每多少秒自动 flush 一次当前缓冲区 (上传识别)。设为 0 表示禁用自动分段,
         // 仅在用户主动 stop() 时整体上传 (注意 MiMo 单次请求 raw 上限约 7.5MB,
         // 16kHz/16bit/mono 下约 234 秒)。
-        val segmentDurationSec: Int = 30,
+        // 语音通话场景下默认 1 秒, 获得"边说边出字"的近实时体验。
+        val segmentDurationSec: Int = 1,
     ) : ASRProviderSetting() {
         override fun copyProvider(
             id: Uuid,

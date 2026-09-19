@@ -280,6 +280,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text("主动消息") },
                     )
                     item(
+                        onClick = { navController.navigate(Screen.SettingHeartbeat) },
+                        leadingContent = { Icon(HugeIcons.Pulse01, null) },
+                        supportingContent = { Text("你连续 N 分钟没回消息时，AI 主动关心你（独立于主动消息）") },
+                        headlineContent = { Text("心跳机制") },
+                    )
+                    item(
                         onClick = { navController.navigate(Screen.SettingWeixinBot) },
                         leadingContent = { Icon(HugeIcons.MessageMultiple01, null) },
                         supportingContent = { Text("把微信号变成 AI 入口，扫码登录后用微信收发消息") },

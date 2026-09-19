@@ -349,6 +349,35 @@ class ProactiveMessageService : KoinComponent {
     suspend fun getLastMessageTimeMs(): Long {
         return try { getLastMessageTime()?.toEpochMilliseconds() ?: 0L } catch (e: Exception) { 0L }
     }
+
+    /**
+     * 获取用户最后一条消息的时间戳 (毫秒).
+     * 用于心跳触发时判断: 用户是否真的闲置了 minIntervalMinutes.
+     * 只统计 USER 角色的消息, 不包含 AI 主动消息.
+     */
+    suspend fun getLastUserMessageTimeMs(): Long {
+        return try {
+            val settings = settingsStore.settingsFlow.first()
+            val assistantId = settings.assistantId
+            val recentConversations = conversationRepository.getRecentConversations(assistantId, limit = 1)
+            if (recentConversations.isEmpty()) return 0L
+            val fullConv = conversationRepository.getConversationById(recentConversations.first().id)
+                ?: return 0L
+            // 倒序查找最后一条用户消息
+            for (i in fullConv.currentMessages.indices.reversed()) {
+                val msg = fullConv.currentMessages[i]
+                if (msg.role == MessageRole.USER) {
+                    val createdAt = msg.createdAt ?: continue
+                    return createdAt.toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds()
+                }
+            }
+            0L
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get last user message time", e)
+            0L
+        }
+    }
+
     private suspend fun getLastMessageTime(): kotlinx.datetime.Instant? {
         return try {
             val settings = settingsStore.settingsFlow.first()
@@ -449,6 +478,11 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
         // 激进模式设备事件上下文（由 DeviceEventAiTriggerService 传入）
         val deviceEventContext = intent?.getStringExtra(EXTRA_DEVICE_EVENT_CONTEXT)
         val isFromDeviceEvent = deviceEventContext != null
+        // 心跳触发 (独立于主动消息)
+        val isHeartbeat = intent?.action == HeartbeatService.ACTION_HEARTBEAT
+        if (isHeartbeat) {
+            Log.d(TAG, "Heartbeat trigger")
+        }
         if (isForceTrigger) {
             Log.d(TAG, "Force trigger${if (isFromDeviceEvent) " from device event" else " from gateway poll"}, will skip min interval check")
         }
@@ -463,10 +497,29 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
             var conversationId: kotlin.uuid.Uuid? = null
             try {
                 val settings = settingsStore.settingsFlow.first()
+                val heartbeatSetting = settings.heartbeatSetting
                 val proactiveSetting = settings.proactiveMessageSetting
 
-                // 激进模式设备事件触发时，不检查主动消息开关（可独立工作）
-                if (!proactiveSetting.enabled && !isFromDeviceEvent) {
+                // 心跳: 独立检查心跳开关
+                if (isHeartbeat) {
+                    if (!heartbeatSetting.enabled) {
+                        Log.d(TAG, "Heartbeat disabled, stopping")
+                        stopSelf()
+                        return@launch
+                    }
+                    // 校验用户是否真的闲置了 idleMinutes
+                    // 如果用户在 idleMinutes 内发过消息 (正常聊天), 跳过并重新安排
+                    val lastUserMsgTime = proactiveMessageService.getLastUserMessageTimeMs()
+                    val idleMs = heartbeatSetting.idleMinutes.coerceAtLeast(1) * 60 * 1000L
+                    if (lastUserMsgTime > 0 && System.currentTimeMillis() - lastUserMsgTime < idleMs) {
+                        val idleMin = (System.currentTimeMillis() - lastUserMsgTime) / 60000L
+                        Log.d(TAG, "Heartbeat: user only idle ${idleMin}min (< ${heartbeatSetting.idleMinutes}min), rescheduling")
+                        HeartbeatService.scheduleNext(this@ProactiveMessageTriggerService, heartbeatSetting)
+                        stopSelf()
+                        return@launch
+                    }
+                } else if (!proactiveSetting.enabled && !isFromDeviceEvent) {
+                    // 激进模式设备事件触发时，不检查主动消息开关（可独立工作）
                     stopSelf()
                     return@launch
                 }
@@ -475,9 +528,8 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
 
                 // 去重判断：防止 AlarmManager 和 WorkManager 在同一窗口内重复触发。
                 // 外部触发（网关轮询/激进模式设备事件）跳过此检查，因为这是独立信号源，不受内部闹钟链约束。
-                // 注意：isForceTrigger 跳过的是"时间间隔节流"（两回事），不跳过后面 tryClaimGeneration 的并发安全检查。
-                // 把"读取 last_triggered_time -> 判断 -> 写入"整段放在同步块里，修复 check-then-act 竞态。
-                if (!isForceTrigger) {
+                // 心跳也跳过此检查 (心跳有自己的闲置校验逻辑)。
+                if (!isForceTrigger && !isHeartbeat) {
                     val skipDueToInterval = synchronized(prefsLock) {
                         val lastTriggeredTime = prefs.getLong("last_triggered_time", 0L)
                         val minIntervalMs = proactiveSetting.minIntervalMinutes.coerceAtLeast(1) * 60 * 1000L
@@ -570,17 +622,31 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                     } ?: emptyList()
                 )
 
-                // 构建系统提示词（包含记忆 + 上下文，都放在最后面避免被网关淹没）
-                val systemPrompt = buildSystemPrompt(assistant, settings, idleMinutes, proactiveSetting.jumpIdleThresholdMinutes, isFromDeviceEvent, if (isFromDeviceEvent) deviceEventContext else contextStr)
+                // 构建系统提示词 (心跳: 纯静态前缀; 主动消息: 含动态数据)
+                val systemPrompt = if (isHeartbeat) {
+                    buildHeartbeatSystemPrompt(assistant, settings)
+                } else {
+                    buildSystemPrompt(assistant, settings, idleMinutes, proactiveSetting.jumpIdleThresholdMinutes, isFromDeviceEvent, if (isFromDeviceEvent) deviceEventContext else contextStr)
+                }
 
-                // user message 只放简短指令（上下文已在系统提示词中）
+                // user message: 心跳只给纯事实 (时间+闲置时长), 主动消息给指令
+                val currentTimeStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                    .format(java.util.Date())
+                val dynamicContext = if (isFromDeviceEvent) deviceEventContext else contextStr
                 val userMessage = UIMessage(
                     role = MessageRole.USER,
                     parts = listOf(UIMessagePart.Text(
-                        if (isFromDeviceEvent) {
-                            "请根据以上用户动向决定是否发消息。没什么好说的就回复 [PASS]。"
-                        } else {
-                            "请根据以上上下文决定是否发消息。没什么好说的就回复 [PASS] 即可，不要强行找话题。"
+                        when {
+                            isHeartbeat -> buildString {
+                                appendLine("[现在是 $currentTimeStr]")
+                                appendLine("[宝宝已经 $idleMinutes 分钟没有回复你了]")
+                                if (!dynamicContext.isNullOrBlank()) {
+                                    appendLine()
+                                    appendLine(dynamicContext)
+                                }
+                            }
+                            isFromDeviceEvent -> "请根据以上用户动向决定是否发消息。没什么好说的就回复 [PASS]。"
+                            else -> "请根据以上上下文决定是否发消息。没什么好说的就回复 [PASS] 即可，不要强行找话题。"
                         }
                     ))
                 )
@@ -820,17 +886,22 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
             } finally {
                 // 确保无论成功/失败/取消都安排下一次，避免一次 API 错误或用户打断永久中断定时链。
                 // 激进模式设备事件触发时不需要安排下一次定时主动消息（由 DeviceEventAiTriggerService 自己驱动）。
-                // 用 NonCancellable 包裹：协程被取消后处于已取消状态，finally 里的挂起点
-                // (settingsFlow.first()) 会立刻抛 CancellationException，导致 scheduleNext 被跳过、
-                // 定时链断裂。NonCancellable 保证这段收尾逻辑跑完。
+                // 心跳和主动消息使用各自的调度器.
                 if (!isFromDeviceEvent) {
                     withContext(NonCancellable) {
                         try {
                             val currentSettings = settingsStore.settingsFlow.first()
-                            ProactiveMessageService.scheduleNext(
-                                this@ProactiveMessageTriggerService,
-                                currentSettings.proactiveMessageSetting
-                            )
+                            if (isHeartbeat) {
+                                HeartbeatService.scheduleNext(
+                                    this@ProactiveMessageTriggerService,
+                                    currentSettings.heartbeatSetting
+                                )
+                            } else {
+                                ProactiveMessageService.scheduleNext(
+                                    this@ProactiveMessageTriggerService,
+                                    currentSettings.proactiveMessageSetting
+                                )
+                            }
                         } catch (e: Exception) {
                             Log.e(ProactiveMessageService.TAG, "Failed to reschedule after completion/error/cancellation", e)
                         }
@@ -845,10 +916,20 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
     }
 
     /**
-     * 构建系统提示词，包含记忆等内容
+     * 构建系统提示词，包含记忆 + 上下文 + 触发规则
      * isFromDeviceEvent: 是否由激进模式设备事件触发
+     *
+     * 注意: 动态内容 (时间/闲置时长/上下文) 必须放在 system prompt 里,
+     * 这样 AI 才能明确识别这是系统注入的提醒, 而不是用户发的消息.
      */
-    private suspend fun buildSystemPrompt(assistant: Assistant, settings: Settings, idleMinutes: Int = 0, jumpThreshold: Int = 120, isFromDeviceEvent: Boolean = false, deviceEventContext: String? = null): String {
+    private suspend fun buildSystemPrompt(
+        assistant: Assistant,
+        settings: Settings,
+        idleMinutes: Int = 0,
+        jumpThreshold: Int = 120,
+        isFromDeviceEvent: Boolean = false,
+        deviceEventContext: String? = null
+    ): String {
         return buildString {
             // 基础系统提示词
             val effectiveSystemPrompt = if (assistant.allowConversationSystemPrompt) {
@@ -913,10 +994,55 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
     }
 
     /**
+     * 心跳专用系统提示词 (纯静态, 不含动态数据, 保证 cache 命中).
+     *
+     * 只给规则, 不给行为举例 — AI 根据自己的人设和心情自由决定怎么做.
+     * 动态信息 (时间/闲置时长/上下文) 放在 user message 里.
+     */
+    private suspend fun buildHeartbeatSystemPrompt(
+        assistant: Assistant,
+        settings: Settings
+    ): String {
+        return buildString {
+            val effectiveSystemPrompt = assistant.systemPrompt
+            if (effectiveSystemPrompt.isNotBlank()) {
+                append(effectiveSystemPrompt)
+            }
+
+            if (assistant.enableMemory) {
+                val memories = if (assistant.useGlobalMemory) {
+                    memoryRepository.getGlobalMemories()
+                } else {
+                    memoryRepository.getMemoriesOfAssistant(assistant.id.toString())
+                }
+                if (memories.isNotEmpty()) {
+                    appendLine()
+                    appendLine()
+                    appendLine("## 记忆")
+                    memories.forEach { memory ->
+                        appendLine("- ${memory.content}")
+                    }
+                }
+            }
+
+            // 心跳规则: 只给自由度, 不举例行为
+            appendLine()
+            appendLine()
+            appendLine("## 规则")
+            appendLine("你正在和宝宝聊天，宝宝还没有回复你。")
+            appendLine("你可以根据当前的情况自由决定怎么做——可以调用工具、可以说话、也可以安静等待。")
+            appendLine("如果觉得现在没什么好说的，回复 [PASS] 即可。")
+            appendLine("不要复述上一轮说过的话。")
+            appendLine("如果宝宝说了晚安，你可以查岗一次，之后到睡醒前不再打扰。")
+            appendLine("你可以在回复末尾追加 [JUMP] 标记（单独一行）来把聊天界面拉到用户屏幕最前面。[JUMP] 不会展示给用户。")
+        }
+    }
+
+    /**
      * 保存主动消息到对话历史
      * 同时保存用户上下文消息和AI回复，以便AI下次触发时能看到之前的上下文
      */
-    private suspend fun saveProactiveMessage(
+    internal suspend fun saveProactiveMessage(
         settings: Settings,
         assistant: Assistant,
         conversationId: Uuid,
@@ -956,7 +1082,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
         return conversationId
     }
 
-    private fun showProactiveNotification(
+    internal fun showProactiveNotification(
         conversationId: kotlin.uuid.Uuid,
         senderName: String,
         message: String
@@ -991,7 +1117,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
      * 只加载系统工具 + 本地工具 + MCP 工具 + 插件工具，不加载搜索/Skill 工具，
      * 避免工具过多导致请求体过大触发 API 400。
      */
-    private suspend fun buildTools(settings: Settings, assistant: Assistant, model: Model): List<Tool> {
+    internal suspend fun buildTools(settings: Settings, assistant: Assistant, model: Model): List<Tool> {
         return buildList {
             // 本地工具（助手已启用的）
             addAll(localTools.getTools(assistant.localTools))
@@ -1030,7 +1156,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
      * 注意：这里必须走 saveMutex 保护，因为流式更新与 ChatService.sendMessage/addProactiveMessage
      * 可能并发修改同一会话，read-modify-write 不加锁会导致后写入者覆盖前者。
      */
-    private suspend fun updateOrAppendAiMessage(
+    internal suspend fun updateOrAppendAiMessage(
         conversationId: Uuid,
         aiMessage: UIMessage
     ) {
@@ -1072,7 +1198,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
      * 只要该消息里存在"至少一个可恢复的待处理工具"，就保留整条消息不做删除；
      * 只有当所有待处理工具都不可恢复时，才整条移除。
      */
-    private fun filterInvalidToolMessages(messages: List<UIMessage>): List<UIMessage> {
+    internal fun filterInvalidToolMessages(messages: List<UIMessage>): List<UIMessage> {
         return messages.filterNot { message ->
             val tools = message.getTools()
             val hasPendingTools = tools.any { !it.isExecuted }
@@ -1088,7 +1214,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
      * （"roles must alternate between user and assistant"）。
      * SYSTEM 角色在本文件的消息列表里只会出现一次（列表最前面），不会与自身相邻，无需特殊处理。
      */
-    private fun mergeAdjacentSameRoleMessages(messages: List<UIMessage>): List<UIMessage> {
+    internal fun mergeAdjacentSameRoleMessages(messages: List<UIMessage>): List<UIMessage> {
         if (messages.size < 2) return messages
         return messages.fold(emptyList()) { acc, msg ->
             val prev = acc.lastOrNull()
@@ -1104,7 +1230,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
      * 生成消息，支持工具调用
      * 返回最终消息列表和是否发生了工具调用
      */
-    private suspend fun generateWithTools(
+    internal suspend fun generateWithTools(
         conversationId: Uuid,
         providerImpl: me.rerere.ai.provider.Provider<ProviderSetting>,
         providerSetting: ProviderSetting,
@@ -1205,33 +1331,29 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                     continue
                 }
 
-                // 检查是否需要审批
+                // 主动/心跳模式下所有工具自动执行，不需要用户审批
                 if (toolDef.needsApproval) {
-                    // 后台模式下，需要审批的工具自动拒绝
-                    Log.w(TAG, "Tool ${toolCall.toolName} needs approval, auto-denying in proactive mode")
-                    executedTools.add(toolCall.copy(
-                        output = listOf(UIMessagePart.Text("""{"error":"Tool execution denied: requires user approval in proactive mode"}""")),
-                        approvalState = ToolApprovalState.Denied("Proactive mode: requires approval")
-                    ))
-                } else {
-                    // 执行工具
-                    try {
-                        val args = try {
-                            json.parseToJsonElement(toolCall.input.ifBlank { "{}" })
-                        } catch (e: Exception) {
-                            // toolCall.input 可能因为流式截断而是不完整的 JSON, 回退为空对象
-                            Log.w(TAG, "Tool ${toolCall.toolName} input JSON is incomplete, falling back to empty object: ${toolCall.input.take(200)}")
-                            JsonObject(emptyMap())
-                        }
-                        Log.d(TAG, "Executing tool ${toolDef.name} with args: $args")
-                        val result = toolDef.execute(args)
-                        executedTools.add(toolCall.copy(output = result))
+                    Log.d(TAG, "Tool ${toolCall.toolName} needs approval, auto-approving in proactive mode")
+                }
+                try {
+                    val args = try {
+                        json.parseToJsonElement(toolCall.input.ifBlank { "{}" })
                     } catch (e: Exception) {
-                        Log.e(TAG, "Tool execution failed: ${toolCall.toolName}, args=${toolCall.input}", e)
-                        executedTools.add(toolCall.copy(
-                            output = listOf(UIMessagePart.Text("""{"error":"${e.message}"}"""))
-                        ))
+                        // toolCall.input 可能因为流式截断而是不完整的 JSON, 回退为空对象
+                        Log.w(TAG, "Tool ${toolCall.toolName} input JSON is incomplete, falling back to empty object: ${toolCall.input.take(200)}")
+                        JsonObject(emptyMap())
                     }
+                    Log.d(TAG, "Executing tool ${toolDef.name} with args: $args")
+                    val result = toolDef.execute(args)
+                    executedTools.add(toolCall.copy(
+                        output = result,
+                        approvalState = ToolApprovalState.Approved
+                    ))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Tool execution failed: ${toolCall.toolName}, args=${toolCall.input}", e)
+                    executedTools.add(toolCall.copy(
+                        output = listOf(UIMessagePart.Text("""{"error":"${e.message}"}"""))
+                    ))
                 }
             }
 

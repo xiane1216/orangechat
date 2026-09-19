@@ -229,6 +229,17 @@ fun List<UIMessage>.handleMessageChunk(chunk: MessageChunk, model: Model? = null
     }
     val choice = chunk.choices.getOrNull(0) ?: return this
     val message = choice.delta ?: choice.message ?: return this
+
+    // 如果最后一条消息已经是 ASSISTANT，说明 AI 已经开始流式回复了。
+    // 在整个流式回复期间，AI 只能输出 ASSISTANT 消息。某些第三方中转 API
+    // (如 OpenRouter/SiliconFlow) 或模型幻觉可能会在 delta.role 里错误地返回
+    // "user"/"system" 等 role —— 这种情况下我们忽略 chunk 里的 role，
+    // 强制追加到当前 ASSISTANT 消息里，防止凭空插入假的 USER 气泡。
+    if (this.last().role == MessageRole.ASSISTANT) {
+        val last = this.last() + chunk
+        return this.dropLast(1) + last
+    }
+
     if (this.last().role != message.role) {
         return this + (UIMessage(modelId = model?.id, role = message.role, parts = emptyList()) + chunk)
     } else {

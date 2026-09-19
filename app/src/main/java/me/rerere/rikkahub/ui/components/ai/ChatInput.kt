@@ -874,7 +874,10 @@ private fun TextInputRow(
                 },
             shape = MaterialTheme.shapes.largeIncreased,
             placeholder = {
-                Text(stringResource(R.string.chat_input_placeholder))
+                Text(
+                    stringResource(R.string.chat_input_placeholder),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                )
             },
             lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5),
             keyboardOptions = KeyboardOptions(
@@ -1010,7 +1013,10 @@ private fun FullScreenEditor(
                             .fillMaxSize(),
                         shape = RoundedCornerShape(32.dp),
                         placeholder = {
-                            Text(stringResource(R.string.chat_input_placeholder))
+                            Text(
+                                stringResource(R.string.chat_input_placeholder),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                            )
                         },
                         colors = TextFieldDefaults.colors().copy(
                             unfocusedIndicatorColor = Color.Transparent,

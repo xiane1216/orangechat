@@ -342,7 +342,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                             Modifier
                         }
                     )
-                    .padding(vertical = 8.dp),
+                    .padding(vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -422,7 +422,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                                 Modifier
                             }
                         )
-                        .padding(start = 32.dp, top = 4.dp, bottom = 8.dp)
+                        .padding(start = 32.dp, top = 4.dp, bottom = 6.dp)
                 ) {
                     content()
                 }

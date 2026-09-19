@@ -197,6 +197,13 @@ class OpenAIRealtimeASRController(
         scope.cancel()
     }
 
+    override fun resetTranscript() {
+        completedTranscripts.clear()
+        partialTranscripts.clear()
+        _state.update { it.copy(transcript = "") }
+        scope.launch { onTranscriptChange?.invoke("") }
+    }
+
     @SuppressLint("MissingPermission")
     private fun startRecorder(
         provider: ASRProviderSetting.OpenAIRealtime,

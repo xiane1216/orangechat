@@ -204,6 +204,8 @@
       </intent-filter>
     </receiver>
 
+    <!-- Heartbeat uses WorkManager, no receiver needed. Worker starts ProactiveMessageTriggerService directly. -->
+
 
     <!-- Proactive Message Trigger Service -->
     <service

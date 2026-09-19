@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 橘瓣 OrangeChat
  * 衍生自 RikkaHub (https://github.com/rikkahub/rikkahub)，原作者 RE
  * 本项目基于 GNU AGPL v3 开源，详见根目录 LICENSE 文件
@@ -20,60 +20,37 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SweepGradient
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlin.math.abs
-import kotlin.math.sin
 
 /**
- * 流动光球 (ChatGPT 独立语音模式风格)
+ * 浅粉色语音圆球
  *
- * - 纯色深色背景上, 一个发光的、流动感的圆形光斑
- * - 用 sweepGradient (天蓝色 ↔ 白色) 持续旋转/偏移, 制造"流动"观感
- * - 可选 blur 效果 (Android 12+), 低版本降级为不加 blur
- * - 说话/聆听时球体有呼吸缩放, Processing 时流动速度变快
- * - 不再用正弦波浪线叠加
+ * - 低饱和度浅粉色，边缘模糊渐变
+ * - AI 说话时边缘有波纹扩散动画
+ * - 聆听时呼吸缩放
+ * - 支持浅色/深色模式
  */
 @Composable
 fun VoiceOrb(
     modifier: Modifier = Modifier,
     amplitudes: List<Float> = emptyList(),
     status: VoiceCallStatus = VoiceCallStatus.Idle,
-    baseColor: Color = Color(0xFF4FC3F7), // 天蓝色
-    accentColor: Color = Color.White,
-    size: Dp = 240.dp,
+    isDarkMode: Boolean = false,
+    size: Dp = 180.dp,
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "voice_orb")
 
-    // 流动速度: Processing 时更快, 营造"在思考"的感觉
-    val rotationDurationMs = when (status) {
-        VoiceCallStatus.Processing -> 4000
-        VoiceCallStatus.Speaking -> 6000
-        VoiceCallStatus.Listening -> 8000
-        else -> 12000
-    }
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(rotationDurationMs, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "rotation"
-    )
-
     // 呼吸缩放
     val breatheDurationMs = when (status) {
-        VoiceCallStatus.Processing -> 1200
-        VoiceCallStatus.Speaking -> 1800
-        VoiceCallStatus.Listening -> 2400
+        VoiceCallStatus.Listening -> 2000
+        VoiceCallStatus.Speaking -> 1200
+        VoiceCallStatus.Processing -> 1500
         else -> 4000
     }
     val breathe by infiniteTransition.animateFloat(
-        initialValue = 0.9f,
+        initialValue = 0.90f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(breatheDurationMs, easing = LinearEasing),
@@ -82,104 +59,109 @@ fun VoiceOrb(
         label = "breathe"
     )
 
-    // 第二层偏移动画, 让渐变停止点位置持续缓慢变化, 制造"流动"而非简单旋转
-    val shift by infiniteTransition.animateFloat(
+    // 波纹扩散相位 (AI 说话时)
+    val ripplePhase by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(rotationDurationMs * 2, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
+            animation = tween(2000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
         ),
-        label = "shift"
+        label = "ripple"
     )
 
-    // 振幅 -> 强度
+    // 振幅 -> 强度 (增强音波起伏幅度)
     val currentAmplitude = if (amplitudes.isNotEmpty()) {
         amplitudes.takeLast(4).average().toFloat()
     } else {
         0f
     }
     val intensity = when (status) {
-        VoiceCallStatus.Listening -> (currentAmplitude * 0.8f + 0.15f).coerceIn(0.15f, 0.8f)
-        VoiceCallStatus.Speaking -> 0.5f + (currentAmplitude * 0.3f)
+        VoiceCallStatus.Listening -> (currentAmplitude * 1.0f + 0.15f).coerceIn(0.15f, 0.8f)
+        VoiceCallStatus.Speaking -> 0.35f + (currentAmplitude * 0.6f)
         VoiceCallStatus.Processing -> 0.25f
-        VoiceCallStatus.Error -> 0.1f
-        VoiceCallStatus.Idle -> 0.08f
+        VoiceCallStatus.Working -> 0.3f
+        VoiceCallStatus.Error -> 0.08f
+        VoiceCallStatus.Idle -> 0.06f
     }
 
     val scale = breathe + intensity * 0.3f
 
-    // 不再用 Modifier.blur 把整个 Canvas 糊掉 —— 那是球发虚难看的元凶.
-    // 发光感由外层多层半透明圆自然实现, 球体本体保持清晰锐利.
+    // 浅粉色调色板
+    val orbColor = if (isDarkMode) Color(0xFFE8B5B5) else Color(0xFFE8A5A5)
+    val glowColor = if (isDarkMode) Color(0xFFD4A0A0) else Color(0xFFF0C0C0)
+    val rippleColor = if (isDarkMode) Color(0xFFD4A0A0) else Color(0xFFE8B5B5)
+
     Canvas(
         modifier = modifier.size(size)
     ) {
         val canvasSize = this.size.minDimension
         val center = Offset(canvasSize / 2, canvasSize / 2)
-        val baseRadius = canvasSize / 2 * 0.65f
+        val baseRadius = canvasSize / 2 * 0.62f
 
-        // 外层光晕 (多层半透明圆, 制造发光感, 替代原来的整体 blur)
-        for (i in 5 downTo 1) {
-            val layerRadius = baseRadius * scale * (1f + i * 0.22f)
-            val alpha = (0.05f / i) * (1f + intensity)
+        // AI 说话时的波纹扩散 (增强: 更多波纹, 更大扩散范围)
+        if (status == VoiceCallStatus.Speaking || status == VoiceCallStatus.Listening) {
+            val rippleCount = 4
+            for (i in 0 until rippleCount) {
+                val phase = (ripplePhase + i.toFloat() / rippleCount) % 1f
+                val rippleRadius = baseRadius * scale * (1f + phase * 1.2f)
+                val rippleAlpha = (1f - phase) * 0.4f * intensity
+                drawCircle(
+                    color = rippleColor.copy(alpha = rippleAlpha),
+                    radius = rippleRadius,
+                    center = center,
+                    style = Stroke(width = 4f)
+                )
+            }
+        }
+
+        // 外层模糊光晕 (多层半透明圆, 制造边缘模糊渐变)
+        for (i in 6 downTo 1) {
+            val layerRadius = baseRadius * scale * (1f + i * 0.18f)
+            val alpha = (0.04f / i) * (1f + intensity * 1.5f)
             drawCircle(
-                color = baseColor.copy(alpha = alpha.coerceAtMost(0.25f)),
+                color = glowColor.copy(alpha = alpha.coerceAtMost(0.2f)),
                 radius = layerRadius,
                 center = center
             )
         }
 
-        // 主球体: 旋转的 sweepGradient
+        // 主球体: 径向渐变 (中心更亮, 边缘渐淡)
         val mainRadius = baseRadius * scale
-        rotate(degrees = rotation, pivot = center) {
-            // sweepGradient 的颜色数组, shift 参数让停止点位置缓慢变化, 制造流动感
-            val colorStops = arrayOf(
-                0.0f to accentColor.copy(alpha = 0.9f),
-                (0.2f + shift * 0.3f) % 1f to baseColor.copy(alpha = 0.85f),
-                (0.5f + shift * 0.2f) % 1f to accentColor.copy(alpha = 0.7f),
-                (0.8f + shift * 0.25f) % 1f to baseColor.copy(alpha = 0.8f),
-                1.0f to accentColor.copy(alpha = 0.9f)
-            ).sortedBy { it.first }
-
-            drawCircle(
-                brush = Brush.sweepGradient(
-                    colors = colorStops.map { it.second },
-                    center = center
-                ),
-                radius = mainRadius,
-                center = center
-            )
-        }
-
-        // 中心高亮 (径向渐变, 白色 -> 透明, 制造"光斑"核心)
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    accentColor.copy(alpha = 0.6f * (0.5f + intensity)),
-                    accentColor.copy(alpha = 0.2f),
-                    Color.Transparent
+                    orbColor.copy(alpha = 0.9f),
+                    orbColor.copy(alpha = 0.6f),
+                    orbColor.copy(alpha = 0.3f),
+                    orbColor.copy(alpha = 0.1f),
                 ),
                 center = center,
-                radius = mainRadius * 0.6f
+                radius = mainRadius * 1.3f
             ),
-            radius = mainRadius * 0.6f,
+            radius = mainRadius,
             center = center
         )
 
-        // 外圈细环 (有强度时显示, 增强动感)
-        if (intensity > 0.15f) {
-            val ringCount = 2
-            for (i in 0 until ringCount) {
-                val phase = ((rotation / 360f + i.toFloat() / ringCount) % 1f)
-                val ringRadius = baseRadius * (1.15f + phase * 0.5f)
-                val ringAlpha = (1f - phase) * 0.35f * intensity
-                drawCircle(
-                    color = baseColor.copy(alpha = ringAlpha),
-                    radius = ringRadius,
-                    center = center,
-                    style = Stroke(width = 2f)
-                )
-            }
-        }
+        // 中心高亮
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.5f * (0.5f + intensity)),
+                    Color.White.copy(alpha = 0.15f),
+                    Color.Transparent
+                ),
+                center = Offset(
+                    center.x - mainRadius * 0.15f,
+                    center.y - mainRadius * 0.15f
+                ),
+                radius = mainRadius * 0.5f
+            ),
+            radius = mainRadius * 0.5f,
+            center = Offset(
+                center.x - mainRadius * 0.15f,
+                center.y - mainRadius * 0.15f
+            )
+        )
     }
 }

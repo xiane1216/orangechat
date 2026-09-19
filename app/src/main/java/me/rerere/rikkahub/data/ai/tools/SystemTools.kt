@@ -58,6 +58,7 @@ sealed class SystemToolOption {
     @Serializable @SerialName("app_switch") data object AppSwitch : SystemToolOption()
     @Serializable @SerialName("app_lock") data object AppLock : SystemToolOption()
     @Serializable @SerialName("fingerprint") data object Fingerprint : SystemToolOption()
+    @Serializable @SerialName("ezviz_monitor") data object EzvizMonitor : SystemToolOption()
 }
 
 class SystemTools(private val context: Context, private val settings: Settings) {
@@ -388,13 +389,13 @@ class SystemTools(private val context: Context, private val settings: Settings) 
     private val storageInfoTool by lazy { createStorageInfoTool(context) }
     private val appSwitchTool by lazy { createAppSwitchTool(context) }
     private val appLockTool by lazy { createAppLockTool(context) }
-    // 指纹验证: 共用 BiometricPromptActivity.buffer 单例, 保证工具与弹窗 Activity 同一个 buffer
     private val fingerprintTool by lazy {
         me.rerere.rikkahub.data.ai.tools.local.fingerprintTool(
             context,
             me.rerere.rikkahub.ui.activity.BiometricPromptActivity.buffer,
         )
     }
+    private val ezvizTool by lazy { createEzvizTool(context, settings.systemToolsSetting) }
 
     // ==================== 获取工具列表 ====================
 
@@ -438,6 +439,7 @@ class SystemTools(private val context: Context, private val settings: Settings) 
         if (SystemToolOption.AppSwitch in enabledTools) tools.add(appSwitchTool)
         if (SystemToolOption.AppLock in enabledTools) tools.add(appLockTool)
         if (SystemToolOption.Fingerprint in enabledTools) tools.add(fingerprintTool)
+        if (SystemToolOption.EzvizMonitor in enabledTools) tools.add(ezvizTool)
         return tools
     }
 }

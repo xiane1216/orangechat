@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 橘瓣 OrangeChat
  * 衍生自 RikkaHub (https://github.com/rikkahub/rikkahub)，原作者 RE
  * 本项目基于 GNU AGPL v3 开源，详见根目录 LICENSE 文件
@@ -10,25 +10,42 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.net.Uri
 import android.os.IBinder
 import android.util.Log
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.animateColorAsState
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -42,9 +59,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,48 +72,28 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Mic01
-import me.rerere.hugeicons.stroke.MicOff01
+import me.rerere.hugeicons.stroke.Translate
+import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.service.VoiceCallService
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionRecordAudio
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
+import java.io.File
 import kotlin.uuid.Uuid
 
 private const val TAG = "VoiceCallPage"
 
-// 暖色色板 (用户指定, 原值不动) - 不同状态对应不同主色
-private val ColorIdle = Color(0xFF9D9A55)   // 暗卡其 - 准备就绪
-private val ColorListening = Color(0xFFC6BD56) // 金黄 - 聆听
-private val ColorProcessing = Color(0xFFFDAE4F) // 琥珀 - 思考
-private val ColorSpeaking = Color(0xFFF58232)   // 橙 - 传达
-
-// 暖色深底 (提亮一档, 不再死黑, 让暖色光晕透得出来)
-private val ColorBgWarm = Color(0xFF241A0B)
+/** 通话头像保存路径 */
+private val Context.voiceCallAvatarFile: File
+    get() = File(filesDir, "voice_call_avatar.jpg")
 
 /**
- * 状态 -> 主色
- */
-private fun statusAccentColor(status: VoiceCallStatus): Color = when (status) {
-    VoiceCallStatus.Idle -> ColorIdle
-    VoiceCallStatus.Listening -> ColorListening
-    VoiceCallStatus.Processing -> ColorProcessing
-    VoiceCallStatus.Speaking -> ColorSpeaking
-    VoiceCallStatus.Error -> Color(0xFFE5484D)
-}
-
-/**
- * 语音通话页面 (ChatGPT 独立语音模式风格)
- *
- * - 暖色深色背景 + 随状态微妙变色的径向光晕
- * - 流动光球 (颜色随状态变化)
- * - 多行流式字幕 (聆听/思考显示, 传达/就绪隐藏)
- * - 底部只有两个按钮: 静音 / 挂断
- * - 返回键 = 切后台继续通话 (不挂断)
- * - 业务逻辑全部跑在 VoiceCallService 里, 页面只负责 bind + 显示 uiState
+ * 语音通话页面
  */
 @Composable
 fun VoiceCallPage(
@@ -103,7 +103,6 @@ fun VoiceCallPage(
     val context = LocalContext.current
     var boundService by remember { mutableStateOf<VoiceCallService?>(null) }
 
-    // 录音权限
     val asrPermission = rememberPermissionState(PermissionRecordAudio)
 
     val connection = remember {
@@ -118,12 +117,8 @@ fun VoiceCallPage(
         }
     }
 
-    // bind/unbind Service. 关键: onDispose 只解绑, 绝不调用 endCall/stopService
     DisposableEffect(conversationId) {
-        // 如果 Service 还没在跑这个对话的通话, 先 start 再 bind
-        // 如果已经在跑 (用户是从通知点回来的), 只 bind, 不重复 start
         if (VoiceCallService.activeConversationId.value != conversationId.toString()) {
-            // 权限检查: 没权限先请求, 拿到权限后再 start (见下方 LaunchedEffect)
             if (asrPermission.allRequiredPermissionsGranted) {
                 VoiceCallService.start(context, conversationId.toString())
             }
@@ -140,7 +135,6 @@ fun VoiceCallPage(
         }
     }
 
-    // 权限授予后启动 Service (如果还没启动)
     LaunchedEffect(asrPermission.allRequiredPermissionsGranted) {
         if (asrPermission.allRequiredPermissionsGranted &&
             VoiceCallService.activeConversationId.value == null
@@ -149,147 +143,186 @@ fun VoiceCallPage(
         }
     }
 
-    // 进入页面时, 如果还没权限, 请求权限
     LaunchedEffect(Unit) {
         if (!asrPermission.allRequiredPermissionsGranted) {
             asrPermission.requestPermissions()
         }
     }
 
-    // boundService 为 null (绑定还没完成) 时, 显示默认空状态
     val uiState by (boundService?.uiState
         ?: MutableStateFlow(VoiceCallUiState()).asStateFlow())
         .collectAsStateWithLifecycle(initialValue = VoiceCallUiState())
 
-    // 返回键 = 切后台继续通话, 不挂断. 这是这次改动最核心的行为变化.
     BackHandler {
         onBack()
     }
 
-    // 随状态平滑过渡的主色 (光球 / 标签 / 背景光晕共用)
-    val accentColor by animateColorAsState(
-        targetValue = statusAccentColor(uiState.status),
-        animationSpec = tween(durationMillis = 800),
-        label = "accentColor"
-    )
+    // 深色模式纯黑透彻, 浅色模式纯白
+    val bg = MaterialTheme.colorScheme.background
+    // 手动计算亮度 (0.299R + 0.587G + 0.114B)
+    val lum = 0.299f * bg.red + 0.587f * bg.green + 0.114f * bg.blue
+    val isDark = lum < 0.5f
+    val bgColor = if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
+
+    // 头像选择
+    val avatarPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    context.voiceCallAvatarFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+        }
+    }
+    var avatarVersion by remember { mutableStateOf(0) }
+
+    // 实时通话计时
+    var callDuration by remember { mutableStateOf(0L) }
+    LaunchedEffect(uiState.callStartTime) {
+        if (uiState.callStartTime > 0) {
+            while (true) {
+                callDuration = System.currentTimeMillis() - uiState.callStartTime
+                kotlinx.coroutines.delay(1000)
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(ColorBgWarm)
-            // 叠加一层跟随状态的径向暖色光晕, 整屏融入当前状态色
-            // (透明度调高, 让背景真的透出暖色, 而不是死黑一片)
-            .drawBehind {
-                drawRect(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            accentColor.copy(alpha = 0.45f),
-                            accentColor.copy(alpha = 0.18f),
-                            accentColor.copy(alpha = 0.03f),
-                            Color.Transparent
-                        ),
-                        center = androidx.compose.ui.geometry.Offset(
-                            size.width / 2f,
-                            size.height * 0.4f
-                        ),
-                        radius = size.maxDimension * 0.75f
-                    )
-                )
-            }
+            .background(bgColor)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 顶部: 状态标签 (用当前状态主色, 与光球/背景同色系)
+            // 顶部留白, 把所有内容往下挪
+            Spacer(modifier = Modifier.size(72.dp))
+
+            // 名字 "Daddy" — 细体 + 字间距 + 发光
             Text(
-                text = statusText(uiState.status),
-                color = accentColor,
+                text = "Daddy",
+                color = if (isDark) Color(0xFFFFFFFF) else Color(0xFF1A1A1A),
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Light,
+                letterSpacing = 6.sp,
+                textAlign = TextAlign.Center,
+                style = androidx.compose.ui.text.TextStyle(
+                    shadow = androidx.compose.ui.graphics.Shadow(
+                        color = if (isDark) Color(0x66FFFFFF) else Color(0x33000000),
+                        blurRadius = 18f,
+                    )
+                ),
+            )
+            Spacer(modifier = Modifier.size(10.dp))
+            // 通话计时 — 细体等宽 + 大字间距
+            Text(
+                text = formatCallDuration(callDuration),
+                color = if (isDark) Color(0x99FFFFFF) else Color(0x99000000),
                 fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(top = 80.dp)
+                fontWeight = FontWeight.Light,
+                letterSpacing = 4.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
             )
 
-            // 中部: 流动光球 (颜色随状态变化)
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.weight(1f)
-            ) {
-                Spacer(modifier = Modifier.size(40.dp))
+            Spacer(modifier = Modifier.size(36.dp))
 
-                VoiceOrb(
-                    amplitudes = uiState.amplitudes,
-                    status = uiState.status,
-                    baseColor = accentColor,
-                    size = 200.dp
-                )
-
-                // 绑定还没完成时, 显示一个小的加载指示器
-                if (boundService == null) {
-                    Spacer(modifier = Modifier.size(24.dp))
-                    CircularProgressIndicator(
-                        color = Color.White.copy(alpha = 0.5f),
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(24.dp)
+            // 头像 + 音波环
+            CallAvatar(
+                avatarFile = context.voiceCallAvatarFile,
+                avatarVersion = avatarVersion,
+                isDark = isDark,
+                onClick = {
+                    avatarPicker.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                        )
                     )
-                }
-            }
+                    avatarVersion++
+                },
+            )
 
-            // 字幕区: 按状态切换显示谁的字幕
-            // - 聆听/思考: 显示用户刚说的话 (思考时保留, 让用户确认 AI 听到了什么)
-            // - 传达/就绪: 显示 AI 的话 (传达时逐句增长, 说完后仍保留在屏上,
-            //   直到下一轮用户开始说话、Service 清掉 assistantText 才换掉)
-            val subtitleText = when (uiState.status) {
-                VoiceCallStatus.Listening,
-                VoiceCallStatus.Processing -> uiState.userTranscript
-                VoiceCallStatus.Speaking,
-                VoiceCallStatus.Idle -> uiState.assistantText
-                VoiceCallStatus.Error -> ""
-            }
-            if (subtitleText.isNotBlank()) {
-                StreamingSubtitle(
-                    text = subtitleText,
-                    accentColor = accentColor
-                )
-            }
+            Spacer(modifier = Modifier.size(24.dp))
 
-            // 错误信息 (保留, 方便调试)
-            uiState.errorMessage?.let { error ->
-                Text(
-                    text = error,
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 32.dp)
-                )
+            // 状态文字 (中文 + 英文)
+            val (statusCn, statusEn) = when (uiState.status) {
+                VoiceCallStatus.Listening -> "聆听中..." to "LISTENING"
+                VoiceCallStatus.Processing -> "思考中..." to "THINKING"
+                VoiceCallStatus.Working -> "Working..." to "WORKING"
+                VoiceCallStatus.Speaking -> "说话中..." to "SPEAKING"
+                VoiceCallStatus.Error -> "出错了" to "ERROR"
+                VoiceCallStatus.Idle -> "等待中..." to "IDLE"
             }
+            Text(
+                text = statusCn,
+                color = if (isDark) Color(0xFFFFFFFF) else Color(0xFF1A1A1A),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Light,
+            )
+            Text(
+                text = statusEn,
+                color = if (isDark) Color(0x66FFFFFF) else Color(0x66000000),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Light,
+                letterSpacing = 3.sp,
+                modifier = Modifier.padding(top = 2.dp),
+            )
 
-            // 底部: 只有两个按钮 (ChatGPT 风格)
-            // 左: 静音, 右: 挂断.
+            Spacer(modifier = Modifier.size(12.dp))
+
+            // 竖条音波 (仅 AI 说话时起伏)
+            WaveformBars(
+                isActive = uiState.status == VoiceCallStatus.Speaking,
+                amplitudes = uiState.amplitudes,
+            )
+
+            Spacer(modifier = Modifier.size(16.dp))
+
+            // 字幕卡片
+            SubtitleCard(
+                uiState = uiState,
+                onReplay = { text -> boundService?.replayText(text) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+            )
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            // 底部按钮: 麦克风 / 翻译 / 挂断 / 外放
             Row(
-                horizontalArrangement = Arrangement.spacedBy(56.dp),
+                horizontalArrangement = Arrangement.spacedBy(28.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 64.dp)
+                modifier = Modifier.padding(bottom = 50.dp, top = 12.dp),
             ) {
-                // 静音按钮
-                val canControl = boundService != null
                 ControlButton(
-                    icon = if (uiState.isMuted) HugeIcons.MicOff01 else HugeIcons.Mic01,
-                    contentDescription = "静音",
-                    onClick = {
-                        boundService?.toggleMute()
-                    },
+                    icon = HugeIcons.Mic01,
+                    contentDescription = "麦克风",
+                    onClick = { boundService?.toggleMute() },
                     backgroundColor = if (uiState.isMuted) {
-                        Color.White.copy(alpha = 0.3f)
+                        MaterialTheme.colorScheme.surfaceVariant
                     } else {
-                        Color.White.copy(alpha = 0.15f)
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                     },
-                    iconTint = Color.White,
-                    enabled = canControl
+                    iconTint = if (uiState.isMuted) {
+                        Color(0xFFC98A8A)
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    enabled = boundService != null,
                 )
-
-                // 挂断按钮
+                ControlButton(
+                    icon = HugeIcons.Translate,
+                    contentDescription = "翻译",
+                    onClick = { boundService?.toggleAutoSend() },
+                    backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    enabled = boundService != null,
+                )
                 ControlButton(
                     icon = HugeIcons.Cancel01,
                     contentDescription = "挂断",
@@ -297,9 +330,130 @@ fun VoiceCallPage(
                         VoiceCallService.stop(context)
                         onBack()
                     },
-                    backgroundColor = MaterialTheme.colorScheme.error,
+                    backgroundColor = Color(0xFFE09A97),
                     iconTint = Color.White,
-                    enabled = true // 挂断始终可点, 即使 service 还没绑定
+                    size = 58.dp,
+                )
+                ControlButton(
+                    icon = HugeIcons.VolumeHigh,
+                    contentDescription = "外放",
+                    onClick = { },
+                    backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+    }
+}
+
+private fun formatCallDuration(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%02d:%02d".format(minutes, seconds)
+    }
+}
+
+/**
+ * 圆形头像 + 缓慢匀速音波环 + 边缘发光
+ */
+@Composable
+private fun CallAvatar(
+    avatarFile: File,
+    avatarVersion: Int,
+    isDark: Boolean,
+    onClick: () -> Unit,
+    size: Dp = 160.dp,
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "avatar_ring")
+    // 缓慢匀速呼吸, 不随状态变化
+    val breathe by infiniteTransition.animateFloat(
+        initialValue = 0.96f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(3000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "avatar_breathe",
+    )
+    val ringPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(3000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "avatar_ring",
+    )
+
+    // 深色模式用粉白光晕, 浅色模式用淡粉
+    val ringColor = if (isDark) Color(0xFFE8C4C4) else Color(0xFFE0B0B0)
+    val glowColor = if (isDark) Color(0x55E8C4C4) else Color(0x33E0B0B0)
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.size(size),
+    ) {
+        // 头像边缘发光层 (多层同心圆模拟 soft glow)
+        Canvas(modifier = Modifier.size(size)) {
+            val center = Offset(size.toPx() / 2, size.toPx() / 2)
+            val avatarRadius = size.toPx() / 2 * 0.82f
+            // 发光: 从头像边缘向外扩散的柔光晕
+            for (i in 0 until 8) {
+                val r = avatarRadius + i * 4f
+                val alpha = (1f - i / 8f) * 0.18f
+                drawCircle(
+                    color = glowColor.copy(alpha = alpha),
+                    radius = r,
+                    center = center,
+                )
+            }
+        }
+
+        // 扩散音波环 (缓慢匀速, 始终存在)
+        Canvas(modifier = Modifier.size(size)) {
+            val center = Offset(size.toPx() / 2, size.toPx() / 2)
+            val baseRadius = size.toPx() / 2 * 0.85f
+            for (i in 0 until 3) {
+                val phase = (ringPhase + i.toFloat() / 3f) % 1f
+                val radius = baseRadius * (1f + phase * 0.35f)
+                val alpha = (1f - phase) * 0.35f
+                drawCircle(
+                    color = ringColor.copy(alpha = alpha),
+                    radius = radius,
+                    center = center,
+                    style = Stroke(width = 2.5f),
+                )
+            }
+        }
+
+        // 头像本体
+        Box(
+            modifier = Modifier
+                .size(size * 0.82f * breathe)
+                .clip(CircleShape)
+                .border(3.dp, Color.White.copy(alpha = 0.8f), CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .clickable { onClick() },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (avatarFile.exists()) {
+                AsyncImage(
+                    model = avatarFile,
+                    contentDescription = "头像",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Text(
+                    text = "D",
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                    fontSize = 40.sp,
+                    fontWeight = FontWeight.Bold,
                 )
             }
         }
@@ -307,40 +461,268 @@ fun VoiceCallPage(
 }
 
 /**
- * 多行流式字幕
- *
- * - 自动换行, 超出容器高度向上滚动, 始终显示最新文字
- * - Listening/Processing 状态使用; Speaking/Idle 由上层隐藏
+ * 竖条音波 (仅 AI 说话时起伏)
  */
 @Composable
-private fun StreamingSubtitle(
-    text: String,
-    accentColor: Color,
+private fun WaveformBars(
+    isActive: Boolean,
+    amplitudes: List<Float>,
     modifier: Modifier = Modifier,
 ) {
-    val scrollState = rememberScrollState()
-    // 文本增长时滚到最底部, 让最新内容始终可见
-    LaunchedEffect(text) {
-        if (text.isNotEmpty()) {
-            scrollState.animateScrollTo(scrollState.maxValue)
+    val barCount = 28
+    val heights = remember(amplitudes, isActive) {
+        val ampSize = amplitudes.size
+        List(barCount) { i ->
+            if (isActive && ampSize > 0) {
+                val amp = amplitudes[i % ampSize]
+                (0.15f + amp * 0.85f).coerceIn(0.1f, 1f)
+            } else {
+                0.12f
+            }
         }
     }
 
-    Column(
-        modifier = modifier
-            .padding(horizontal = 36.dp, vertical = 16.dp)
-            .heightIn(max = 140.dp)
-            .verticalScroll(scrollState),
-        horizontalAlignment = Alignment.CenterHorizontally
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier.height(36.dp),
     ) {
+        heights.forEachIndexed { i, h ->
+            val animatedH by animateFloatAsState(
+                targetValue = h,
+                animationSpec = tween(durationMillis = 120),
+                label = "bar_$i",
+            )
+            Box(
+                modifier = Modifier
+                    .size(width = 3.dp, height = (30.dp * animatedH))
+                    .background(
+                        color = Color(0xFFE0A8A8).copy(alpha = if (isActive) 0.8f else 0.3f),
+                        shape = RoundedCornerShape(2.dp),
+                    )
+            )
+        }
+    }
+}
+
+/**
+ * 字幕卡片: 滚动历史 + 实时字幕
+ *
+ * 格式 (保留完整历史对话):
+ *   · 宝宝  · 23:42
+ *   xxxx
+ *   · Daddy  · 23:42
+ *   xxxx
+ *   xxxx（翻译）
+ *   ...
+ */
+@Composable
+private fun SubtitleCard(
+    uiState: VoiceCallUiState,
+    onReplay: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val listState = rememberLazyListState()
+    val history = uiState.subtitleHistory
+
+    // 历史新增时平滑滚动到底部
+    LaunchedEffect(history.size) {
+        if (history.isNotEmpty()) {
+            listState.animateScrollToItem(history.size - 1)
+        }
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        shape = RoundedCornerShape(20.dp),
+        modifier = modifier.heightIn(max = 320.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 14.dp),
+        ) {
+            // 工具调用提示
+            AnimatedVisibility(
+                visible = uiState.toolCallInfo != null,
+                enter = fadeIn(tween(300)),
+                exit = fadeOut(tween(300)),
+            ) {
+                uiState.toolCallInfo?.let { info ->
+                    Text(
+                        text = info,
+                        color = Color(0xFFC98A8A),
+                        fontSize = 12.sp,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        fontWeight = FontWeight.Light,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                }
+            }
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .heightIn(max = 260.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(
+                    items = history,
+                    key = { it.timestamp.toString() + it.text.hashCode() }
+                ) { entry ->
+                    SubtitleItem(entry = entry, onReplay = onReplay)
+                }
+            }
+
+            // 实时用户字幕 (聆听中)
+            if (uiState.status == VoiceCallStatus.Listening && uiState.userTranscript.isNotBlank()) {
+                LiveSubtitle(
+                    name = "宝宝",
+                    nameColor = Color(0xFFC98A8A),
+                    text = uiState.userTranscript,
+                )
+            }
+            // 实时 AI 字幕 (说话中/思考中)
+            if ((uiState.status == VoiceCallStatus.Speaking ||
+                        uiState.status == VoiceCallStatus.Processing ||
+                        uiState.status == VoiceCallStatus.Working) &&
+                uiState.assistantText.isNotBlank()
+            ) {
+                LiveSubtitle(
+                    name = "Daddy",
+                    nameColor = Color(0xFF8A8F9C),
+                    text = uiState.assistantText,
+                    translation = uiState.assistantTranslation,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubtitleItem(
+    entry: SubtitleEntry,
+    onReplay: (String) -> Unit,
+) {
+    val name = if (entry.isAssistant) "Daddy" else "宝宝"
+    val nameColor = if (entry.isAssistant) Color(0xFF8A8F9C) else Color(0xFFC98A8A)
+    val time = remember(entry.timestamp) {
+        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date(entry.timestamp))
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // 名字行: · 宝宝  · 23:42  (点加粗)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "·",
+                color = nameColor,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = " $name ",
+                color = nameColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "· $time",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                fontSize = 11.sp,
+            )
+        }
+        // 消息内容
         Text(
-            text = text.ifBlank { " " },
-            color = Color.White.copy(alpha = 0.92f),
-            fontSize = 16.sp,
-            lineHeight = 24.sp,
-            fontWeight = FontWeight.Normal,
-            textAlign = TextAlign.Center
+            text = entry.text,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 14.sp,
+            lineHeight = 20.sp,
+            modifier = Modifier.padding(top = 2.dp),
         )
+        // AI 回复的翻译
+        if (entry.translation.isNotBlank()) {
+            Text(
+                text = entry.translation,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        if (entry.isAssistant) {
+            Row(
+                modifier = Modifier.padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ReplayButton(onClick = { onReplay(entry.text) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveSubtitle(
+    name: String,
+    nameColor: Color,
+    text: String,
+    translation: String = "",
+) {
+    val time = remember {
+        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date())
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("·", color = nameColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(" $name ", color = nameColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text("· $time", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), fontSize = 11.sp)
+        }
+        Text(
+            text = text,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 14.sp,
+            lineHeight = 20.sp,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        if (translation.isNotBlank()) {
+            Text(
+                text = translation,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReplayButton(onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.height(28.dp),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 14.dp),
+        ) {
+            Text(
+                text = "重播语音",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+            )
+        }
     }
 }
 
@@ -349,12 +731,13 @@ private fun StreamingSubtitle(
  */
 @Composable
 private fun ControlButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
     backgroundColor: Color,
     iconTint: Color,
-    size: Dp = 64.dp,
+    size: Dp = 54.dp,
+    iconSizeRatio: Float = 0.38f,
     enabled: Boolean = true,
 ) {
     Surface(
@@ -362,26 +745,18 @@ private fun ControlButton(
         shape = CircleShape,
         color = if (enabled) backgroundColor else backgroundColor.copy(alpha = 0.3f),
         modifier = Modifier.size(size),
-        enabled = enabled
+        enabled = enabled,
     ) {
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
                 tint = if (enabled) iconTint else iconTint.copy(alpha = 0.5f),
-                modifier = Modifier.size(size * 0.4f)
+                modifier = Modifier.size(size * iconSizeRatio),
             )
         }
     }
-}
-
-private fun statusText(status: VoiceCallStatus): String = when (status) {
-    VoiceCallStatus.Idle -> "准备就绪"
-    VoiceCallStatus.Listening -> "正在聆听"
-    VoiceCallStatus.Processing -> "正在思考"
-    VoiceCallStatus.Speaking -> "正在传达"
-    VoiceCallStatus.Error -> "出错了"
 }

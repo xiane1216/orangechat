@@ -18,7 +18,26 @@ enum class VoiceCallStatus {
     Listening,
     Processing,
     Speaking,
+    /** AI 正在调用工具 */
+    Working,
     Error
+}
+
+/**
+ * 字幕历史条目
+ */
+data class SubtitleEntry(
+    val role: SubtitleRole,
+    val text: String,
+    val translation: String = "",
+    val timestamp: Long = System.currentTimeMillis(),
+    /** 是否为 AI 回复 (决定是否显示"重播语音"按钮) */
+    val isAssistant: Boolean = false,
+)
+
+enum class SubtitleRole {
+    User,
+    Assistant,
 }
 
 /**
@@ -28,10 +47,16 @@ data class VoiceCallUiState(
     val status: VoiceCallStatus = VoiceCallStatus.Idle,
     val userTranscript: String = "",
     val assistantText: String = "",
+    val assistantTranslation: String = "",
     val errorMessage: String? = null,
     val amplitudes: List<Float> = emptyList(),
     val isMuted: Boolean = false,
     val autoSendEnabled: Boolean = true,
+    val toolCallInfo: String? = null,
+    /** 通话开始时间戳 (用于实时计时) */
+    val callStartTime: Long = 0L,
+    /** 字幕历史记录 (滚动显示) */
+    val subtitleHistory: List<SubtitleEntry> = emptyList(),
 ) {
     val isActive: Boolean
         get() = status != VoiceCallStatus.Idle

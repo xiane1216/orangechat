@@ -7,7 +7,7 @@
   <string name="about_page_version">版本</string>
   <string name="about_page_website">官网</string>
   <string name="add">添加</string>
-  <string name="app_name">橘瓣</string>
+  <string name="app_name">L</string>
   <string name="asr_button_content_description">语音识别</string>
   <string name="asr_button_stop">停止</string>
   <string name="assistant_detail_basic_desc">配置名称、头像、模型和参数</string>
@@ -232,7 +232,7 @@
   <string name="cancel_edit">取消编辑</string>
   <string name="chain_of_thought_collapse">收起</string>
   <string name="chain_of_thought_show_more_steps">再显示 %d 步</string>
-  <string name="chat_input_placeholder">输入消息与AI聊天</string>
+  <string name="chat_input_placeholder">跟daddy说句话...</string>
   <string name="chat_input_unsupported_file_type">不支持的文件类型：%s</string>
   <string name="chat_message_add_favorite">添加收藏</string>
   <string name="chat_message_remove_favorite">取消收藏</string>

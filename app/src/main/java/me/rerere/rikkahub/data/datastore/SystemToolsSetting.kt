@@ -89,6 +89,13 @@ data class SystemToolsSetting(
 
     // Fingerprint: verify_fingerprint 工具, 弹出系统指纹/人脸验证框验证用户身份
     val fingerprintEnabled: Boolean = false,
+
+    // 萤石云监控: AI 可调用 ezviz_capture 工具抓取摄像头实时画面截图并识别
+    val ezvizEnabled: Boolean = false,
+    val ezvizAppKey: String = "",
+    val ezvizAppSecret: String = "",
+    // 可选: 指定设备序列号, 不填则自动取账号下第一个在线设备
+    val ezvizDeviceSerial: String = "",
 ) {
     fun getEnabledOptions(): Set<me.rerere.rikkahub.data.ai.tools.SystemToolOption> {
         val options = mutableSetOf<me.rerere.rikkahub.data.ai.tools.SystemToolOption>()
@@ -120,6 +127,7 @@ data class SystemToolsSetting(
         if (appSwitchEnabled) options.add(me.rerere.rikkahub.data.ai.tools.SystemToolOption.AppSwitch)
         if (appLockEnabled) options.add(me.rerere.rikkahub.data.ai.tools.SystemToolOption.AppLock)
         if (fingerprintEnabled) options.add(me.rerere.rikkahub.data.ai.tools.SystemToolOption.Fingerprint)
+        if (ezvizEnabled) options.add(me.rerere.rikkahub.data.ai.tools.SystemToolOption.EzvizMonitor)
         return options
     }
 }

@@ -70,6 +70,11 @@ class VolcengineASRController(
     private var audioRecord: AudioRecord? = null
     private var onTranscriptChange: ((String) -> Unit)? = null
     private var lastText = ""
+    // resetTranscript() 时记录的服务端文本基线.
+    // Volcengine 是 WebSocket 长连接, 服务端会累积整段会话的文字,
+    // 每轮对话 reset 时把当前文本存为 baseline, 后续收到服务端结果时,
+    // 如果文本以 baseline 开头就剥掉旧部分, 只显示本轮新增的文字.
+    private var resetBaseline = ""
 
     // 用户主动 stop() 时置 true, 用来区分"用户挂断"和"网络断开需要重连"
     @Volatile
@@ -91,6 +96,7 @@ class VolcengineASRController(
 
         this.onTranscriptChange = onTranscriptChange
         lastText = ""
+        resetBaseline = ""
         isStopping = false
         reconnectAttempts = 0
         reconnectJob?.cancel()
@@ -212,6 +218,14 @@ class VolcengineASRController(
         scope.cancel()
     }
 
+    override fun resetTranscript() {
+        // 记录当前服务端累积文本作为基线, 后续结果中剥掉这部分
+        resetBaseline = lastText
+        lastText = ""
+        _state.update { it.copy(transcript = "") }
+        scope.launch { onTranscriptChange?.invoke("") }
+    }
+
     private fun buildFullClientRequestPayload(): ByteArray {
         val audio = JSONObject()
             .put("format", "pcm")
@@ -275,11 +289,21 @@ class VolcengineASRController(
                 }
 
                 val rawText = json.optJSONObject("result")?.optString("text", "") ?: ""
-                val text = rawText.stripTrailingEmoji()
-                if (text.isNotEmpty() && text != lastText) {
-                    lastText = text
-                    _state.update { it.copy(transcript = text, errorMessage = null) }
-                    scope.launch { onTranscriptChange?.invoke(text) }
+                val fullText = rawText.stripTrailingEmoji()
+                if (fullText == lastText) return
+                lastText = fullText
+                // 如果服务端文本以 resetBaseline 开头, 说明是累积文本,
+                // 剥掉旧部分只显示本轮新增; 否则 (服务端自己重置了) 直接显示.
+                val displayText = if (resetBaseline.isNotEmpty() &&
+                    fullText.startsWith(resetBaseline)
+                ) {
+                    fullText.substring(resetBaseline.length)
+                } else {
+                    fullText
+                }
+                if (displayText.isNotEmpty()) {
+                    _state.update { it.copy(transcript = displayText, errorMessage = null) }
+                    scope.launch { onTranscriptChange?.invoke(displayText) }
                 }
             }
 

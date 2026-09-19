@@ -40,7 +40,10 @@ class WebDavSync(
     private val context: Context,
     private val httpClient: HttpClient,
     private val pluginRepository: PluginRepository,
+    private val conversationRepository: me.rerere.rikkahub.data.repository.ConversationRepository,
 ) {
+    private var pendingBackupDbFile: File? = null
+
     private fun getClient(config: WebDavConfig): WebDavClient {
         return WebDavClient(config, httpClient)
     }
@@ -272,35 +275,17 @@ class WebDavSync(
 
                         "rikka_hub.db", "rikka_hub-wal", "rikka_hub-shm" -> {
                             if (config.items.contains(WebDavConfig.BackupItem.DATABASE)) {
-                                val dbFile = when (zipEntry.name) {
-                                    "rikka_hub.db" -> context.getDatabasePath("rikka_hub")
-                                    "rikka_hub-wal" -> File(
-                                        context.getDatabasePath("rikka_hub").parentFile,
-                                        "rikka_hub-wal"
-                                    )
-
-                                    "rikka_hub-shm" -> File(
-                                        context.getDatabasePath("rikka_hub").parentFile,
-                                        "rikka_hub-shm"
-                                    )
-
-                                    else -> null
-                                }
-
-                                dbFile?.let { targetFile ->
-                                    Log.i(
-                                        TAG,
-                                        "restoreFromBackupFile: Restoring ${zipEntry.name} to ${targetFile.absolutePath}"
-                                    )
-                                    targetFile.parentFile?.mkdirs()
-                                    FileOutputStream(targetFile).use { outputStream ->
+                                // 不再直接覆盖数据库文件 (会导致 Room 迁移崩溃)
+                                // 而是将 db 文件解压到临时位置, 稍后读取 conversations 导入到当前数据库
+                                if (zipEntry.name == "rikka_hub.db") {
+                                    val tempDbFile = File(context.cacheDir, "temp_backup_rikka_hub.db")
+                                    FileOutputStream(tempDbFile).use { outputStream ->
                                         zipIn.copyTo(outputStream)
                                     }
-                                    Log.i(
-                                        TAG,
-                                        "restoreFromBackupFile: Restored ${zipEntry.name} (${targetFile.length()} bytes)"
-                                    )
+                                    pendingBackupDbFile = tempDbFile
+                                    Log.i(TAG, "restoreFromBackupFile: Saved backup db to temp file")
                                 }
+                                // wal/shm 文件忽略, 只需要主 db 文件读取数据
                             }
                         }
 
@@ -365,6 +350,217 @@ class WebDavSync(
         }
 
         Log.i(TAG, "restoreFromBackupFile: Restore completed successfully")
+
+        // 从备份数据库导入 conversations (不覆盖当前数据库, 避免 Room 迁移崩溃)
+        pendingBackupDbFile?.let { dbFile ->
+            try {
+                importConversationsFromBackupDb(dbFile)
+            } finally {
+                dbFile.delete()
+                pendingBackupDbFile = null
+            }
+        }
+    }
+
+    /**
+     * 从备份数据库文件中读取 conversations 并导入到当前数据库.
+     * 不直接覆盖数据库文件, 避免 Room 版本迁移导致崩溃.
+     */
+    private suspend fun importConversationsFromBackupDb(backupDbFile: File) {
+        if (!backupDbFile.exists()) {
+            Log.w(TAG, "importConversations: backup db file not found")
+            return
+        }
+
+        val sqliteDb = try {
+            android.database.sqlite.SQLiteDatabase.openDatabase(
+                backupDbFile.absolutePath, null,
+                android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "importConversations: failed to open backup db", e)
+            return
+        }
+
+        try {
+            // 检查 conversationentity 表是否存在
+            val tableCursor = sqliteDb.rawQuery(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='conversationentity'", null
+            )
+            val hasTable = tableCursor.use { it.moveToFirst() && it.count > 0 }
+            if (!hasTable) {
+                Log.w(TAG, "importConversations: conversationentity table not found in backup")
+                return
+            }
+
+            // 获取列名, 兼容旧版 schema (可能缺少 folder_id 等列)
+            val columnCursor = sqliteDb.rawQuery("PRAGMA table_info(conversationentity)", null)
+            val columns = mutableListOf<String>()
+            columnCursor.use {
+                while (it.moveToNext()) {
+                    columns.add(it.getString(1))
+                }
+            }
+
+            // 新版备份将消息存在 message_node 表 (conversationentity.nodes 恒为 "[]"),
+            // 因此需要额外读取该表, 否则导入的对话会没有消息.
+            val messageNodeTableCursor = sqliteDb.rawQuery(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='message_node'", null
+            )
+            val hasMessageNodeTable = messageNodeTableCursor.use { it.moveToFirst() && it.count > 0 }
+            val messageNodesByConversation = if (hasMessageNodeTable) {
+                loadMessageNodesFromBackup(sqliteDb)
+            } else {
+                emptyMap()
+            }
+
+            val convCursor = sqliteDb.rawQuery("SELECT * FROM conversationentity", null)
+            var importedCount = 0
+            var skippedCount = 0
+
+            convCursor.use {
+                while (it.moveToNext()) {
+                    try {
+                        val id = it.getString(it.getColumnIndexOrThrow("id"))
+                        val assistantId = it.getString(it.getColumnIndexOrThrow("assistant_id"))
+                        val title = it.getString(it.getColumnIndexOrThrow("title"))
+                        val nodesJson = it.getString(it.getColumnIndexOrThrow("nodes"))
+                        val createAt = it.getLong(it.getColumnIndexOrThrow("create_at"))
+                        val updateAt = it.getLong(it.getColumnIndexOrThrow("update_at"))
+                        val chatSuggestionsJson = if (columns.contains("suggestions")) {
+                            it.getString(it.getColumnIndexOrThrow("suggestions")) ?: "[]"
+                        } else "[]"
+                        val isPinned = if (columns.contains("is_pinned")) {
+                            it.getInt(it.getColumnIndexOrThrow("is_pinned")) == 1
+                        } else false
+                        val customSystemPrompt = if (columns.contains("custom_system_prompt")) {
+                            it.getString(it.getColumnIndexOrThrow("custom_system_prompt")) ?: ""
+                        } else ""
+                        val folderId = if (columns.contains("folder_id")) {
+                            it.getString(it.getColumnIndexOrThrow("folder_id")) ?: ""
+                        } else ""
+
+                        // 检查是否已存在
+                        if (conversationRepository.existsConversationById(
+                                kotlin.uuid.Uuid.parse(id)
+                            )
+                        ) {
+                            skippedCount++
+                            continue
+                        }
+
+                        // 优先从 message_node 表读取消息节点; 否则回退到旧版 nodes JSON
+                        val messageNodes = messageNodesByConversation[id]
+                            ?: parseMessageNodesFromBackup(nodesJson)
+
+                        // 剥离 base64 内嵌图片, 避免触发 ConversationRepository 中的
+                        // require(...) 校验失败导致整条对话被跳过.
+                        val cleanedNodes = stripBase64ImageParts(messageNodes)
+
+                        val conversation = me.rerere.rikkahub.data.model.Conversation(
+                            id = kotlin.uuid.Uuid.parse(id),
+                            assistantId = kotlin.uuid.Uuid.parse(assistantId),
+                            title = title,
+                            messageNodes = cleanedNodes,
+                            chatSuggestions = runCatching {
+                                json.decodeFromString<List<String>>(chatSuggestionsJson)
+                            }.getOrDefault(emptyList()),
+                            isPinned = isPinned,
+                            createAt = java.time.Instant.ofEpochMilli(createAt),
+                            updateAt = java.time.Instant.ofEpochMilli(updateAt),
+                            customSystemPrompt = customSystemPrompt.ifEmpty { null },
+                            folderId = folderId.ifEmpty { null }?.let { kotlin.uuid.Uuid.parse(it) },
+                        )
+
+                        conversationRepository.insertConversation(conversation)
+                        importedCount++
+                    } catch (e: Exception) {
+                        Log.e(TAG, "importConversations: failed to import conversation", e)
+                    }
+                }
+            }
+
+            Log.i(TAG, "importConversations: imported $importedCount, skipped $skippedCount")
+        } finally {
+            sqliteDb.close()
+        }
+    }
+
+    /**
+     * 从备份数据库的 message_node 表读取所有消息节点, 按 conversation_id 分组.
+     */
+    private fun loadMessageNodesFromBackup(
+        sqliteDb: android.database.sqlite.SQLiteDatabase
+    ): Map<String, List<me.rerere.rikkahub.data.model.MessageNode>> {
+        val result = mutableMapOf<String, MutableList<me.rerere.rikkahub.data.model.MessageNode>>()
+        val cursor = sqliteDb.rawQuery(
+            "SELECT id, conversation_id, node_index, messages, select_index FROM message_node ORDER BY conversation_id, node_index",
+            null
+        )
+        cursor.use {
+            while (it.moveToNext()) {
+                try {
+                    val nodeId = it.getString(it.getColumnIndexOrThrow("id"))
+                    val conversationId = it.getString(it.getColumnIndexOrThrow("conversation_id"))
+                    val messagesJson = it.getString(it.getColumnIndexOrThrow("messages"))
+                    val selectIndex = it.getInt(it.getColumnIndexOrThrow("select_index"))
+
+                    val messages = runCatching {
+                        json.decodeFromString<List<me.rerere.ai.ui.UIMessage>>(messagesJson)
+                    }.getOrElse { e ->
+                        Log.e(TAG, "loadMessageNodesFromBackup: failed to parse messages", e)
+                        emptyList()
+                    }
+
+                    val node = me.rerere.rikkahub.data.model.MessageNode(
+                        id = kotlin.uuid.Uuid.parse(nodeId),
+                        messages = messages,
+                        selectIndex = selectIndex,
+                    )
+                    result.getOrPut(conversationId) { mutableListOf() }.add(node)
+                } catch (e: Exception) {
+                    Log.e(TAG, "loadMessageNodesFromBackup: failed to read node", e)
+                }
+            }
+        }
+        return result
+    }
+
+    /**
+     * 剥离消息中内嵌的 base64 图片, 避免触发 require 校验失败.
+     */
+    private fun stripBase64ImageParts(
+        nodes: List<me.rerere.rikkahub.data.model.MessageNode>
+    ): List<me.rerere.rikkahub.data.model.MessageNode> {
+        return nodes.map { node ->
+            node.copy(
+                messages = node.messages.map { msg ->
+                    msg.copy(
+                        parts = msg.parts.map { part ->
+                            if (part is me.rerere.ai.ui.UIMessagePart.Image && part.url.startsWith("data:")) {
+                                part.copy(url = "")
+                            } else {
+                                part
+                            }
+                        }
+                    )
+                }
+            )
+        }
+    }
+
+    /**
+     * 解析备份数据库中的 nodes JSON 为 List<MessageNode>.
+     * 兼容旧版格式 (nodes 直接存 List<MessageNode> 的 JSON).
+     */
+    private fun parseMessageNodesFromBackup(nodesJson: String?): List<me.rerere.rikkahub.data.model.MessageNode> {
+        if (nodesJson.isNullOrBlank() || nodesJson == "[]") return emptyList()
+        return runCatching {
+            json.decodeFromString<List<me.rerere.rikkahub.data.model.MessageNode>>(nodesJson)
+        }.getOrElse { e ->
+            Log.e(TAG, "parseMessageNodes: failed to parse nodes JSON", e)
+            emptyList()
+        }
     }
 
     private fun addFileToZip(zipOut: ZipOutputStream, file: File, entryName: String) {
