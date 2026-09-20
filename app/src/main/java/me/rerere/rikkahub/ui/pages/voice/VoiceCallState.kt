@@ -27,6 +27,8 @@ enum class VoiceCallStatus {
  * 字幕历史条目
  */
 data class SubtitleEntry(
+    // 唯一 id: LazyColumn 的 key 使用, 避免 timestamp+hashCode 拼接碰撞导致崩溃
+    val id: Long = System.nanoTime(),
     val role: SubtitleRole,
     val text: String,
     val translation: String = "",
@@ -57,6 +59,10 @@ data class VoiceCallUiState(
     val callStartTime: Long = 0L,
     /** 字幕历史记录 (滚动显示) */
     val subtitleHistory: List<SubtitleEntry> = emptyList(),
+    /** 字幕翻译开关 (关闭后不再调用翻译接口) */
+    val translationEnabled: Boolean = true,
+    /** 扬声器外放开关 (默认 true, 与 TTS 媒体流默认路由一致; 关闭走听筒) */
+    val speakerOn: Boolean = true,
 ) {
     val isActive: Boolean
         get() = status != VoiceCallStatus.Idle

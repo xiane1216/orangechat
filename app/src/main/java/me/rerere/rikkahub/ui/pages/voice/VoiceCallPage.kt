@@ -38,7 +38,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -282,22 +281,23 @@ fun VoiceCallPage(
 
             Spacer(modifier = Modifier.size(16.dp))
 
-            // 字幕卡片
+            // 字幕卡片: weight(1f) 弹性占据中间剩余空间 —
+            // 卡片高度固定为"屏幕减去顶部固定内容", 字幕再多也只在卡片内滚动,
+            // 永远不会把底部四个按键挤小/挤出屏幕
             SubtitleCard(
                 uiState = uiState,
                 onReplay = { text -> boundService?.replayText(text) },
                 modifier = Modifier
                     .fillMaxWidth()
+                    .weight(1f)
                     .padding(horizontal = 20.dp),
             )
-
-            Spacer(modifier = Modifier.weight(1f))
 
             // 底部按钮: 麦克风 / 翻译 / 挂断 / 外放
             Row(
                 horizontalArrangement = Arrangement.spacedBy(28.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 50.dp, top = 12.dp),
+                modifier = Modifier.padding(bottom = 50.dp, top = 16.dp),
             ) {
                 ControlButton(
                     icon = HugeIcons.Mic01,
@@ -318,9 +318,17 @@ fun VoiceCallPage(
                 ControlButton(
                     icon = HugeIcons.Translate,
                     contentDescription = "翻译",
-                    onClick = { boundService?.toggleAutoSend() },
-                    backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    onClick = { boundService?.toggleTranslation() },
+                    backgroundColor = if (uiState.translationEnabled) {
+                        Color(0xFFC98A8A).copy(alpha = 0.25f)
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    },
+                    iconTint = if (uiState.translationEnabled) {
+                        Color(0xFFC98A8A)
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    },
                     enabled = boundService != null,
                 )
                 ControlButton(
@@ -337,9 +345,18 @@ fun VoiceCallPage(
                 ControlButton(
                     icon = HugeIcons.VolumeHigh,
                     contentDescription = "外放",
-                    onClick = { },
-                    backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    onClick = { boundService?.toggleSpeaker() },
+                    backgroundColor = if (uiState.speakerOn) {
+                        Color(0xFFC98A8A).copy(alpha = 0.25f)
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    },
+                    iconTint = if (uiState.speakerOn) {
+                        Color(0xFFC98A8A)
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    },
+                    enabled = boundService != null,
                 )
             }
         }
@@ -462,6 +479,9 @@ private fun CallAvatar(
 
 /**
  * 竖条音波 (仅 AI 说话时起伏)
+ *
+ * Speaking 期间 TTS 侧没有实时振幅数据 (amplitudes 来自 ASR), 若直接用
+ * 旧数据波形会冻住. 这里在激活且无振幅时用无限动画模拟起伏.
  */
 @Composable
 private fun WaveformBars(
@@ -470,24 +490,37 @@ private fun WaveformBars(
     modifier: Modifier = Modifier,
 ) {
     val barCount = 28
-    val heights = remember(amplitudes, isActive) {
-        val ampSize = amplitudes.size
-        List(barCount) { i ->
-            if (isActive && ampSize > 0) {
-                val amp = amplitudes[i % ampSize]
-                (0.15f + amp * 0.85f).coerceIn(0.1f, 1f)
-            } else {
-                0.12f
-            }
-        }
-    }
+    val hasAmps = isActive && amplitudes.isNotEmpty()
+
+    // 无振幅数据时的模拟波形相位 (每根条错开的正弦)
+    val phase by rememberInfiniteTransition(label = "waveform")
+        .animateFloat(
+            initialValue = 0f,
+            targetValue = (2 * Math.PI).toFloat(),
+            animationSpec = infiniteRepeatable(
+                animation = tween(900, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "waveform_phase",
+        )
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier.height(36.dp),
     ) {
-        heights.forEachIndexed { i, h ->
+        val ampSize = amplitudes.size
+        repeat(barCount) { i ->
+            val h = when {
+                hasAmps -> {
+                    val amp = amplitudes[i % ampSize]
+                    (0.15f + amp * 0.85f).coerceIn(0.1f, 1f)
+                }
+                // 激活但无数据: 正弦模拟, 相邻条相位错开
+                isActive -> (0.35f + 0.3f * kotlin.math.sin(phase + i * 0.6f))
+                    .coerceIn(0.15f, 0.8f)
+                else -> 0.12f
+            }
             val animatedH by animateFloatAsState(
                 targetValue = h,
                 animationSpec = tween(durationMillis = 120),
@@ -525,17 +558,17 @@ private fun SubtitleCard(
     val listState = rememberLazyListState()
     val history = uiState.subtitleHistory
 
-    // 历史新增时平滑滚动到底部
-    LaunchedEffect(history.size) {
+    // 历史新增时平滑滚动到底部 (用最后一条的 id 而不是 size, 避免同尺寸更新错过滚动)
+    LaunchedEffect(history.lastOrNull()?.id, history.size) {
         if (history.isNotEmpty()) {
-            listState.animateScrollToItem(history.size - 1)
+            runCatching { listState.animateScrollToItem(history.size - 1) }
         }
     }
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         shape = RoundedCornerShape(20.dp),
-        modifier = modifier.heightIn(max = 320.dp),
+        modifier = modifier,
     ) {
         Column(
             modifier = Modifier
@@ -563,16 +596,19 @@ private fun SubtitleCard(
                 }
             }
 
+            // 字幕历史: weight(1f) 在卡片内弹性伸缩, 内容在框内滚动,
+            // 卡片整体高度由外层布局固定, 不随字幕长度变化
             LazyColumn(
                 state = listState,
                 modifier = Modifier
-                    .heightIn(max = 260.dp),
+                    .weight(1f)
+                    .fillMaxWidth(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(
                     items = history,
-                    key = { it.timestamp.toString() + it.text.hashCode() }
+                    key = { it.id }
                 ) { entry ->
                     SubtitleItem(entry = entry, onReplay = onReplay)
                 }

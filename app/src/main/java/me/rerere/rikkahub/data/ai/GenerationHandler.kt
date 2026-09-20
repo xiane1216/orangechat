@@ -397,7 +397,61 @@ class GenerationHandler(
                     appendLine()
                     append(buildMemoryPrompt(memories = memories))
                 }
- 
+
+                // ---- 静态区: 代码文件说明 / 工具prompt / 插件注入 / 规则说明 ----
+                // 注意顺序: 这些内容在多次请求间保持不变, 放在外置记忆召回等动态内容
+                // 之前, 保证前缀稳定, 最大化 provider 端 prompt cache 命中率.
+
+                // 代码文件命名和ZIP打包功能说明
+                appendLine()
+                append(buildCodeBlockPrompt())
+
+                // 工具prompt
+                tools.forEach { tool ->
+                    appendLine()
+                    append(tool.systemPrompt(model, messages))
+                }
+
+                // 插件提示词注入
+                if (pluginPromptInjections.isNotEmpty()) {
+                    pluginPromptInjections.forEach { injection ->
+                        appendLine()
+                        appendLine()
+                        append(injection)
+                    }
+                }
+
+                // 允许跳过回复
+                if (assistant.allowSkipReply) {
+                    appendLine()
+                    appendLine()
+                    appendLine("## Skip Reply")
+                    appendLine("If you determine that no reply is needed (e.g., the user's message doesn't require a response, or you have nothing meaningful to add), you may reply with exactly `[SKIP]` (without any other text). This message will be hidden from the user. Use this sparingly and only when truly appropriate.")
+                }
+
+                // 屏幕跳转能力（AI总是可以跳转，不需要开关）
+                appendLine()
+                appendLine()
+                appendLine("## 屏幕跳转能力")
+                appendLine("你可以在回复末尾追加 [JUMP] 标记（单独一行）来把聊天界面拉到用户屏幕最前面。")
+                appendLine("适用场景：")
+                appendLine("- 用户说要去别的应用，你觉得需要把用户拉回来时")
+                appendLine("- 你觉得接下来的内容需要用户立即看到时")
+                appendLine("不适用场景：")
+                appendLine("- 一般闲聊不需要跳转")
+                appendLine("- 用户正在跟你正常对话时不需要跳转")
+                appendLine("[JUMP] 标记不会展示给用户，仅用于触发屏幕跳转。")
+
+                // 分气泡: 告知模型它自己能控制消息如何被拆成多个气泡
+                if (assistant.splitBubbleByLine) {
+                    appendLine()
+                    appendLine()
+                    appendLine("## Message Bubbles")
+                    appendLine("Your reply will be automatically split into separate chat bubbles at every line break (\\n) you write, similar to how a person sends several short texts in a row instead of one long message. You are fully in control of this: write a line break whenever you want the previous thought/sentence to appear as its own bubble, and keep things on the same line when they belong together. Do not insert blank lines purely for spacing — every line break becomes a new bubble, so use them intentionally. Exception: line breaks inside fenced code blocks (```) and Markdown tables are preserved as-is and will NOT create new bubbles, since those must stay intact as a single block.")
+                }
+
+                // ---- 动态区: 每次请求都会变化的内容, 统一放在系统提示词最末尾 ----
+
                 // 外置记忆库召回
                 try {
                     val externalMemoryConfigs = settings.externalMemories.filter {
@@ -493,62 +547,12 @@ class GenerationHandler(
                 } catch (e: Exception) {
                     Log.w(TAG, "External memory recall failed", e)
                 }
- 
+
                 if (assistant.enableRecentChatsReference) {
                     appendLine()
                     append(buildRecentChatsPrompt(assistant, conversationRepo))
                 }
- 
-                // 代码文件命名和ZIP打包功能说明
-                appendLine()
-                append(buildCodeBlockPrompt())
- 
-                // 工具prompt
-                tools.forEach { tool ->
-                    appendLine()
-                    append(tool.systemPrompt(model, messages))
-                }
- 
-                // 插件提示词注入
-                if (pluginPromptInjections.isNotEmpty()) {
-                    pluginPromptInjections.forEach { injection ->
-                        appendLine()
-                        appendLine()
-                        append(injection)
-                    }
-                }
- 
-                // 允许跳过回复
-                if (assistant.allowSkipReply) {
-                    appendLine()
-                    appendLine()
-                    appendLine("## Skip Reply")
-                    appendLine("If you determine that no reply is needed (e.g., the user's message doesn't require a response, or you have nothing meaningful to add), you may reply with exactly `[SKIP]` (without any other text). This message will be hidden from the user. Use this sparingly and only when truly appropriate.")
-                }
 
-                // 屏幕跳转能力（AI总是可以跳转，不需要开关）
-                if (true) {
-                    appendLine()
-                    appendLine()
-                    appendLine("## 屏幕跳转能力")
-                    appendLine("你可以在回复末尾追加 [JUMP] 标记（单独一行）来把聊天界面拉到用户屏幕最前面。")
-                    appendLine("适用场景：")
-                    appendLine("- 用户说要去别的应用，你觉得需要把用户拉回来时")
-                    appendLine("- 你觉得接下来的内容需要用户立即看到时")
-                    appendLine("不适用场景：")
-                    appendLine("- 一般闲聊不需要跳转")
-                    appendLine("- 用户正在跟你正常对话时不需要跳转")
-                    appendLine("[JUMP] 标记不会展示给用户，仅用于触发屏幕跳转。")
-                }
- 
-                // 分气泡: 告知模型它自己能控制消息如何被拆成多个气泡
-                if (assistant.splitBubbleByLine) {
-                    appendLine()
-                    appendLine()
-                    appendLine("## Message Bubbles")
-                    appendLine("Your reply will be automatically split into separate chat bubbles at every line break (\\n) you write, similar to how a person sends several short texts in a row instead of one long message. You are fully in control of this: write a line break whenever you want the previous thought/sentence to appear as its own bubble, and keep things on the same line when they belong together. Do not insert blank lines purely for spacing — every line break becomes a new bubble, so use them intentionally. Exception: line breaks inside fenced code blocks (```) and Markdown tables are preserved as-is and will NOT create new bubbles, since those must stay intact as a single block.")
-                }
- 
             }
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))
             addAll(messages.limitContext(assistant.contextMessageSize))

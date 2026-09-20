@@ -513,9 +513,15 @@ class ChatService(
 
                 _generationDoneFlow.emit(conversationId)
             } catch (e: Exception) {
+                // 协程被取消 (用户发新消息时 session.getJob()?.cancel() 打断旧生成)
+                // 是正常流程, 不算错误, 必须原样抛出让取消语义继续传播;
+                // 新一轮生成结束时自会广播 done, 这里不用补发.
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 e.printStackTrace()
                 Log.e(TAG, "sendMessage failed, conversationId=$conversationId", e)
                 addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
+                // 生成失败也要广播"结束" — 否则语音通话等监听者会永远卡在 Processing
+                runCatching { _generationDoneFlow.emit(conversationId) }
             }
         }
         session.setJob(job)

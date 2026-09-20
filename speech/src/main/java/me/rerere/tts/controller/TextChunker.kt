@@ -23,8 +23,9 @@ class TextChunker(
                 paragraph
                     .split(punctuationRegex)
                     .asSequence()
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() }
+                    // 保留分段处的空格/缩进: TTS 依赖空格获得自然停顿,
+                    // 之前 trim 会把 "1. 2. 3." 变成 "1.2.3.", 导致连读/断句错乱
+                    .filter { it.isNotBlank() }
                     .fold(mutableListOf<StringBuilder>()) { acc, seg ->
                         if (acc.isEmpty() || acc.last().length + seg.length > maxChunkLength) {
                             acc.add(StringBuilder(seg))
@@ -33,7 +34,7 @@ class TextChunker(
                         }
                         acc
                     }
-                    .map { it.toString() }
+                    .map { it.toString().trim() }
             }
         }
 

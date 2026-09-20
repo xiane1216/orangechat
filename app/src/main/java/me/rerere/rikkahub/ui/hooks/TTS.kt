@@ -98,12 +98,24 @@ interface CustomTtsState {
     fun cleanup()
 
     /**
+     * 外放路由开关 (true=扬声器, false=听筒).
+     * 语音通话页"外放"按钮使用.
+     */
+    fun setSpeakerphone(enabled: Boolean)
+
+    /**
      * 流式朗读: 追加一段文本到 TTS 队列, 不清空当前播放.
      * 用于语音通话中"边生成边朗读"的场景.
      *
      * @param text 要追加朗读的文本片段
      */
     fun enqueueText(text: String)
+
+    /**
+     * 重播: 追加一段文本到 TTS 队列, 但不做内容去重.
+     * 用于"重播语音"场景 — 即使这段文字本轮已经朗读过也要再播一遍.
+     */
+    fun replay(text: String)
 }
 
 internal class CustomTtsStateImpl(
@@ -159,11 +171,22 @@ internal class CustomTtsStateImpl(
         controller.setSpeed(speed)
     }
 
+    override fun setSpeakerphone(enabled: Boolean) {
+        controller.setSpeakerphone(enabled)
+    }
+
     override fun enqueueText(text: String) {
         if (text.isBlank()) return
         val processed = text.stripMarkdown()
         if (processed.isBlank()) return
         controller.speak(processed, flush = false)
+    }
+
+    override fun replay(text: String) {
+        if (text.isBlank()) return
+        val processed = text.stripMarkdown()
+        if (processed.isBlank()) return
+        controller.speak(processed, flush = false, dedupe = false)
     }
 
     override fun cleanup() {

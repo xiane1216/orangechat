@@ -208,9 +208,18 @@ class ProactiveMessageService : KoinComponent {
         }
     }
 
-    suspend fun buildProactiveContext(context: Context, settings: Settings): String {
+    /**
+     * 构建触发时的实时状态上下文 (定位/前台应用/应用使用/通知/电量等事实数据).
+     *
+     * @param isHeartbeat 是否为心跳触发. 心跳与主动消息的规则不同:
+     *   - 主动消息: 目标是"主动发一条新消息", 有明确的行为指令;
+     *   - 心跳: AI 可以自由决定 (说话/查岗/调用工具/安静等待), [PASS] 即可.
+     * 两种场景共用事实数据的采集逻辑, 但标签和结尾指令分开,
+     * 避免心跳复用主动消息的提示词造成语义矛盾 (旧 bug).
+     */
+    suspend fun buildProactiveContext(context: Context, settings: Settings, isHeartbeat: Boolean = false): String {
         val sb = StringBuilder()
-        sb.appendLine("[主动消息上下文]")
+        sb.appendLine(if (isHeartbeat) "[心跳检查上下文]" else "[主动消息上下文]")
 
         // Time since last chat
         try {
@@ -330,18 +339,27 @@ class ProactiveMessageService : KoinComponent {
         // 健康状态（Gadgetbridge）- 跳过，AI可通过工具自行查询
 
         sb.appendLine()
-        sb.appendLine("请根据以上上下文，以自然、关心、有趣的方式主动给用户发一条消息。")
-        sb.appendLine()
-        sb.appendLine("重要规则：")
-        sb.appendLine("- 绝对不要复述上一轮的对话内容，要发新的话题或新的关心")
-        sb.appendLine("- 如果上一轮已经说过类似的话，这次换一个完全不同的角度")
-        sb.appendLine("- 不要提及你是在定时发消息，要像自然想起对方一样")
-        sb.appendLine("- 绝对不要提及任何数据来源、工具使用、传感器数据、位置服务、应用使用统计等技术细节")
-        sb.appendLine("- 不要说\"根据xxx\"、\"我注意到xxx数据\"之类暴露信息来源的话")
-        sb.appendLine("- 直接以朋友聊天的语气开口，就像你突然想到了什么想跟对方说")
-        sb.appendLine("- 不要使用任何XML标签、思考标记或特殊格式，只输出纯文本的消息内容")
-        sb.appendLine("- 不要调用任何工具或函数，只输出纯文本回复")
-        sb.appendLine("- 不要输出思考过程、推理过程或内部独白，只输出你想对用户说的话")
+        if (isHeartbeat) {
+            // 心跳场景的结尾指令: 与心跳系统提示词的规则保持一致 (自由决定, 不强制发消息)
+            sb.appendLine("以上是当前的实时状态信息，供你了解现状参考。")
+            sb.appendLine("你可以根据这些信息自由决定怎么做——可以关心一下、可以调用工具查询更多信息、也可以安静等待。")
+            sb.appendLine("如果觉得现在没什么好说的，回复 [PASS] 即可。")
+            sb.appendLine("不要向用户提及这些数据的来源、工具、传感器等技术细节，也不要说你看到了这份上下文。")
+        } else {
+            // 主动消息场景的结尾指令
+            sb.appendLine("请根据以上上下文，以自然、关心、有趣的方式主动给用户发一条消息。")
+            sb.appendLine()
+            sb.appendLine("重要规则：")
+            sb.appendLine("- 绝对不要复述上一轮的对话内容，要发新的话题或新的关心")
+            sb.appendLine("- 如果上一轮已经说过类似的话，这次换一个完全不同的角度")
+            sb.appendLine("- 不要提及你是在定时发消息，要像自然想起对方一样")
+            sb.appendLine("- 绝对不要提及任何数据来源、工具使用、传感器数据、位置服务、应用使用统计等技术细节")
+            sb.appendLine("- 不要说\"根据xxx\"、\"我注意到xxx数据\"之类暴露信息来源的话")
+            sb.appendLine("- 直接以朋友聊天的语气开口，就像你突然想到了什么想跟对方说")
+            sb.appendLine("- 不要使用任何XML标签、思考标记或特殊格式，只输出纯文本的消息内容")
+            sb.appendLine("- 不要调用任何工具或函数，只输出纯文本回复")
+            sb.appendLine("- 不要输出思考过程、推理过程或内部独白，只输出你想对用户说的话")
+        }
         return sb.toString()
     }
 
@@ -441,6 +459,8 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
     companion object {
         private const val TAG = "ProactiveMessageTrigger"
         private const val MAX_TOOL_STEPS = 5 // 主动消息最大工具调用步数
+        // 流式期间落库节流间隔 (ms): 内存态每个 chunk 更新, 落库最多一次/该间隔
+        private const val STREAM_PERSIST_INTERVAL_MS = 800L
         // 外部触发（网关轮询）时跳过内部 minInterval 去重
         const val EXTRA_FORCE_TRIGGER = "force_trigger"
         // 激进模式设备事件上下文（由 DeviceEventAiTriggerService 传入）
@@ -450,6 +470,9 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
         // 前后脚触发导致"最小间隔"被砍半）。纯同步 SharedPreferences 读写，无挂起点，用对象锁即可。
         private val prefsLock = Any()
     }
+
+    // 流式写库节流的最近一次落库时间
+    private var lastStreamPersistTime = 0L
 
     // 输入转换器（与 ChatService 保持一致）
     private val inputTransformers by lazy {
@@ -603,13 +626,16 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
 
                 // 构建上下文
                 val idleMinutes = runCatching { val last = proactiveMessageService.getLastMessageTimeMs(); if (last > 0) ((System.currentTimeMillis() - last) / 60000L).toInt() else Int.MAX_VALUE }.getOrDefault(Int.MAX_VALUE)
+                // 展示用闲置时长: 无记录(MAX_VALUE)时显示"很久", 避免出现 "2147483647 分钟" 这种荒谬输出
+                val idleMinutesText = if (idleMinutes < 0 || idleMinutes >= Int.MAX_VALUE) "很久" else "$idleMinutes 分钟"
 
                 // 如果有设备事件上下文（激进模式），使用它替代常规上下文；否则使用常规上下文
+                // 心跳复用同一份事实采集逻辑, 但结尾指令/标签按心跳语义生成
                 val contextStr = if (isFromDeviceEvent && deviceEventContext != null) {
                     deviceEventContext
                 } else {
                     proactiveMessageService.buildProactiveContext(
-                        this@ProactiveMessageTriggerService, settings
+                        this@ProactiveMessageTriggerService, settings, isHeartbeat
                     )
                 }
 
@@ -626,7 +652,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                 val systemPrompt = if (isHeartbeat) {
                     buildHeartbeatSystemPrompt(assistant, settings)
                 } else {
-                    buildSystemPrompt(assistant, settings, idleMinutes, proactiveSetting.jumpIdleThresholdMinutes, isFromDeviceEvent, if (isFromDeviceEvent) deviceEventContext else contextStr)
+                    buildSystemPrompt(assistant, settings, idleMinutesText, isFromDeviceEvent, if (isFromDeviceEvent) deviceEventContext else contextStr)
                 }
 
                 // user message: 心跳只给纯事实 (时间+闲置时长), 主动消息给指令
@@ -639,7 +665,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                         when {
                             isHeartbeat -> buildString {
                                 appendLine("[现在是 $currentTimeStr]")
-                                appendLine("[宝宝已经 $idleMinutes 分钟没有回复你了]")
+                                appendLine("[宝宝已经 $idleMinutesText 没有回复你了]")
                                 if (!dynamicContext.isNullOrBlank()) {
                                     appendLine()
                                     appendLine(dynamicContext)
@@ -652,15 +678,21 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                 )
 
                 // 应用输入转换器
-                val processedUserMessage = listOf(userMessage).transforms(
+                // 注意: 转换器可能会往列表里插入额外消息 (如 TimeReminderTransformer 会在
+                // 首条 USER 消息前插入 <time_reminder>), 因此不能用 .first() 取结果 —
+                // 那样取到的是插入的提醒消息, 真正的触发消息反而被丢掉 (旧 bug).
+                val processedMessages = listOf(userMessage).transforms(
                     transformers = inputTransformers + templateTransformer,
                     context = this@ProactiveMessageTriggerService,
                     model = model,
                     assistant = assistant,
                     settings = settings
-                ).first()
+                )
+                val processedUserMessage =
+                    processedMessages.firstOrNull { it.id == userMessage.id } ?: userMessage
+                val injectedExtraMessages = processedMessages.filter { it.id != userMessage.id }
 
-                // 组合完整消息列表：System + History + User Context
+                // 组合完整消息列表：System + History + (转换器注入的额外消息) + User Context
                 // 合并相邻同角色消息（包括 history 末尾与合成 User 消息之间可能出现的 USER-USER 相邻），避免 400
                 val messages = mergeAdjacentSameRoleMessages(
                     buildList {
@@ -669,6 +701,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                             parts = listOf(UIMessagePart.Text(systemPrompt))
                         ))
                         addAll(historyMessages)
+                        addAll(injectedExtraMessages)
                         add(processedUserMessage)
                     }
                 )
@@ -714,6 +747,12 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                     if (!hasSchema) Log.w(TAG, "Tool '${t.name}' has NULL parameters schema — may cause API rejection")
                 }
 
+                // 生成前快照当前节点 id 集合:
+                // [PASS] 清理时要移除的是"本次生成期间新增"的全部节点 (含中间工具调用消息),
+                // 而不只是最后一条 aiMessage — 否则会留下悬空 tool_use 污染下一轮请求
+                val initialNodeIds = chatService.getConversationFlow(conversationId).value.messageNodes
+                    .map { it.id }.toHashSet()
+
                 // 执行生成，支持工具调用
                 val (finalMessages, hasToolCalls, hasJumpFlag) = generateWithTools(
                     conversationId = conversationId,
@@ -757,21 +796,20 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                 Log.d(TAG, "Proactive message generated: '${replyText.take(100)}...' (${replyText.length} chars), hasToolCalls=$hasToolCalls, shouldJump=$shouldJump")
 
                 if (replyText.isBlank() || rawText.contains("[PASS]")) {
-                    // AI 选择跳过，移除本次生成的 aiMessage node（基于 id 匹配，不误删历史）
+                    // AI 选择跳过，移除本次生成期间新增的全部节点（基于节点 id 快照，
+                    // 覆盖流式写入的中间工具调用消息，不误删历史）
                     Log.d(ProactiveMessageService.TAG, "AI chose to skip proactive message")
-                    val aiId = aiMessage.id
                     val session = chatService.getOrCreateSession(conversationId)
                     session.saveMutex.withLock {
                         val conv = chatService.getConversationFlow(conversationId).value
-                        chatService.updateConversation(
-                            conversationId,
-                            conv.copy(
-                                messageNodes = conv.messageNodes.filterNot { node ->
-                                    node.messages.any { it.id == aiId }
-                                }
+                        val filteredNodes = conv.messageNodes.filterNot { it.id !in initialNodeIds }
+                        if (filteredNodes.size != conv.messageNodes.size) {
+                            chatService.updateConversation(
+                                conversationId,
+                                conv.copy(messageNodes = filteredNodes)
                             )
-                        )
-                        chatService.saveConversation(conversationId, chatService.getConversationFlow(conversationId).value)
+                            chatService.saveConversation(conversationId, chatService.getConversationFlow(conversationId).value)
+                        }
                     }
                 } else {
                     // 有效回复：session 里已有 aiMessage（流式过程已追加），持久化并发通知
@@ -919,26 +957,20 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
      * 构建系统提示词，包含记忆 + 上下文 + 触发规则
      * isFromDeviceEvent: 是否由激进模式设备事件触发
      *
-     * 注意: 动态内容 (时间/闲置时长/上下文) 必须放在 system prompt 里,
-     * 这样 AI 才能明确识别这是系统注入的提醒, 而不是用户发的消息.
+     * 注意: 动态内容 (闲置时长/设备事件上下文/常规上下文) 统一放在系统提示词的
+     * 最后面 — 静态前缀 (人设/记忆/规则) 保持稳定, 最大化 provider 端 prompt cache 命中.
      */
     private suspend fun buildSystemPrompt(
         assistant: Assistant,
         settings: Settings,
-        idleMinutes: Int = 0,
-        jumpThreshold: Int = 120,
+        idleMinutesText: String = "0 分钟",
         isFromDeviceEvent: Boolean = false,
         deviceEventContext: String? = null
     ): String {
         return buildString {
             // 基础系统提示词
-            val effectiveSystemPrompt = if (assistant.allowConversationSystemPrompt) {
-                assistant.systemPrompt
-            } else {
-                assistant.systemPrompt
-            }
-            if (effectiveSystemPrompt.isNotBlank()) {
-                append(effectiveSystemPrompt)
+            if (assistant.systemPrompt.isNotBlank()) {
+                append(assistant.systemPrompt)
             }
 
             // 记忆（设备事件上下文移到最后面，避免被网关注入的内容淹没）
@@ -958,6 +990,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                 }
             }
 
+            // ---- 以下为动态内容, 全部放在末尾 ----
             if (isFromDeviceEvent) {
                 // 激进模式设备事件触发的专用提示词 + 设备事件上下文（放在最后面，网关追加内容之后模型最后看到的就是这个）
                 appendLine()
@@ -966,7 +999,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                 appendLine("你是因为检测到用户的手机操作动向（切换应用/亮屏锁屏/回桌面）而被触发的。")
                 appendLine("请特别注意：这是设备事件触发，不是定时主动消息。根据用户的手机操作动向来决定是否发消息。")
                 appendLine("绝对不要复述上一轮的对话内容，要发新的话题或新的关心。")
-                appendLine("请根据用户的动向，自然地决定是否主动发一条消息。距离用户上次回复已过去 $idleMinutes 分钟。")
+                appendLine("请根据用户的动向，自然地决定是否主动发一条消息。距离用户上次回复已过去 $idleMinutesText。")
                 appendLine("如果你觉得现在没什么好说的，或者没什么有趣的话题，请只回复 [PASS] 即可。")
                 appendLine("[JUMP] 标记不会展示给用户，仅用于触发屏幕跳转。")
                 // 直接注入设备事件上下文
@@ -979,12 +1012,12 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                 appendLine()
                 appendLine()
                 appendLine("## 主动消息触发（定时触发）")
-                appendLine("距离用户上次回复已过去 $idleMinutes 分钟。")
                 appendLine("这是定时触发的主动消息，不是设备事件触发。")
                 appendLine("绝对不要复述上一轮的对话内容，要发新的话题或新的关心。")
                 appendLine("如果你觉得现在没什么好说的，或者没什么有趣的话题，请只回复 [PASS] 即可。")
                 appendLine("[JUMP] 标记不会展示给用户，仅用于触发屏幕跳转。")
-                // 注入完整上下文（定位、前台app、app使用、通知、电量、健康等）
+                // 动态数据 (闲置时长 + 完整上下文) 放在规则之后, 尽量靠后
+                appendLine("距离用户上次回复已过去 $idleMinutesText。")
                 if (!deviceEventContext.isNullOrBlank()) {
                     appendLine()
                     appendLine(deviceEventContext)
@@ -1155,10 +1188,14 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
      *
      * 注意：这里必须走 saveMutex 保护，因为流式更新与 ChatService.sendMessage/addProactiveMessage
      * 可能并发修改同一会话，read-modify-write 不加锁会导致后写入者覆盖前者。
+     *
+     * @param persist 是否同步落库. 流式期间传 false 只更新内存态 (每秒几十次写库会拖垮
+     * 数据库和 UI), 由调用方按节流策略决定何时持久化; 流结束/工具步进等关键节点传 true。
      */
     internal suspend fun updateOrAppendAiMessage(
         conversationId: Uuid,
-        aiMessage: UIMessage
+        aiMessage: UIMessage,
+        persist: Boolean = true
     ) {
         val session = chatService.getOrCreateSession(conversationId)
         session.saveMutex.withLock {
@@ -1184,7 +1221,9 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                 conv.copy(messageNodes = conv.messageNodes + aiMessage.toMessageNode())
             }
             chatService.updateConversation(conversationId, updated)
-            chatService.saveConversation(conversationId, updated)
+            if (persist) {
+                chatService.saveConversation(conversationId, updated)
+            }
         }
     }
 
@@ -1241,6 +1280,8 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
         assistant: Assistant,
         settings: Settings
     ): Triple<List<UIMessage>, Boolean, Boolean> {
+        // 每次生成开始时重置节流计时, 保证首个 chunk 会立即落库一次
+        lastStreamPersistTime = 0L
         var messages = initialMessages.toMutableList()
         var hasToolCalls = false
         var hasJumpFlag = false // AI 原始输出是否含 [JUMP] 标记（在输出转换器处理前检测）
@@ -1265,7 +1306,12 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                 val currentAiMessage = streamMessages.lastOrNull { it.role == MessageRole.ASSISTANT }
                 if (currentAiMessage != null) {
                     // 用 id 匹配就地更新（保留 node id，避免思考链闪烁 / 覆盖上一条 assistant）
-                    updateOrAppendAiMessage(conversationId, currentAiMessage)
+                    // 流式写库节流: 内存态每个 chunk 都刷新(UI 不卡), 落库最多 1 次/800ms;
+                    // 每步流结束后的关键节点会强制落库, 不存在丢数据窗口
+                    val now = System.currentTimeMillis()
+                    val shouldPersist = now - lastStreamPersistTime >= STREAM_PERSIST_INTERVAL_MS
+                    if (shouldPersist) lastStreamPersistTime = now
+                    updateOrAppendAiMessage(conversationId, currentAiMessage, persist = shouldPersist)
                 }
             }
 

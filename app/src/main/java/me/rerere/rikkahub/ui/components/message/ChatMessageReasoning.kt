@@ -129,6 +129,7 @@ private fun ReasoningContent(
     expandState: ReasoningCardState,
     scrollState: ScrollState,
     fadeHeight: Float,
+    loading: Boolean,
 ) {
     val isPreview = expandState == ReasoningCardState.Preview
     val displaySettings = LocalDisplaySettings.current
@@ -172,15 +173,31 @@ private fun ReasoningContent(
             }
     ) {
         SelectionContainer {
-            MarkdownBlock(
-                content = reasoning.reasoning.replaceRegexes(
-                    assistant = assistant,
-                    scope = AssistantAffectScope.ASSISTANT,
-                    visual = true,
-                ),
-                style = thinkingStyle,
-                modifier = Modifier.fillMaxSize(),
-            )
+            // 渲染性能关键路径: 流式期间 (loading) 每个 chunk 都会触发重组,
+            // MarkdownBlock 会对全文重新做 markdown 解析+排版, 文本越长开销越大,
+            // 表现为"思考链吐字特别慢" (3 秒的内容渲染成几十秒).
+            // 流式期间用纯 Text 直接显示 (零解析开销), 结束后再切换成 Markdown 渲染.
+            if (loading) {
+                Text(
+                    text = reasoning.reasoning.replaceRegexes(
+                        assistant = assistant,
+                        scope = AssistantAffectScope.ASSISTANT,
+                        visual = true,
+                    ),
+                    style = thinkingStyle,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                MarkdownBlock(
+                    content = reasoning.reasoning.replaceRegexes(
+                        assistant = assistant,
+                        scope = AssistantAffectScope.ASSISTANT,
+                        visual = true,
+                    ),
+                    style = thinkingStyle,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 }
@@ -241,6 +258,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 expandState = state.expandState,
                 scrollState = state.scrollState,
                 fadeHeight = fadeHeight,
+                loading = loading,
             )
         },
     )

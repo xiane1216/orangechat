@@ -34,6 +34,24 @@ import java.util.zip.ZipOutputStream
 
 private const val TAG = "WebDavSync"
 
+/**
+ * 备份恢复结果摘要, 用于向用户展示恢复详情 (诊断导入问题):
+ * 备份里有没有数据库/WAL、检测到多少条对话、导入/跳过/失败各多少条等.
+ */
+data class RestoreSummary(
+    val dbInBackup: Boolean = false, // 备份 zip 里包含主数据库文件
+    val walInBackup: Boolean = false, // 备份 zip 里包含 WAL 日志文件
+    val detected: Int = 0, // 备份中检测到的对话总数
+    val imported: Int = 0, // 成功导入条数
+    val skipped: Int = 0, // 已存在跳过条数
+    val failed: Int = 0, // 导入失败条数
+    val firstError: String? = null, // 首条失败原因
+    val remappedAssistant: Int = 0, // 原助手不存在被重新归属的条数
+    val folderedCount: Int = 0, // 处于分组/文件夹中的对话条数
+    val assistantDistribution: List<Pair<String, Int>> = emptyList(), // 备份对话所属助手 (名字 -> 条数)
+    val currentAssistantName: String? = null, // 当前选中的助手名
+)
+
 class WebDavSync(
     private val settingsStore: SettingsStore,
     private val json: Json,
@@ -124,7 +142,7 @@ class WebDavSync(
         Log.i(TAG, "deleteBackupFile: Deleted ${item.displayName}")
     }
 
-    suspend fun restoreFromLocalFile(file: File, config: WebDavConfig) = withContext(Dispatchers.IO) {
+    suspend fun restoreFromLocalFile(file: File, config: WebDavConfig): RestoreSummary = withContext(Dispatchers.IO) {
         Log.i(TAG, "restoreFromLocalFile: Starting restore from ${file.absolutePath}")
 
         if (!file.exists()) {
@@ -136,8 +154,12 @@ class WebDavSync(
         }
 
         try {
-            restoreFromBackupFile(file, config, includePlugins = true)
+            // 本地文件导入是用户明确选择的完整备份, 不受 WebDAV 同步条目开关的限制,
+            // 恢复 zip 中存在的全部内容 (条目开关只应影响 WebDAV/S3 自动备份的导出范围)
+            val fullConfig = config.copy(items = WebDavConfig.BackupItem.entries.toSet())
+            val summary = restoreFromBackupFile(file, fullConfig, includePlugins = true)
             Log.i(TAG, "restoreFromLocalFile: Restore completed successfully")
+            summary
         } catch (e: Exception) {
             Log.e(TAG, "restoreFromLocalFile: Failed to restore from local file", e)
             throw Exception("Restore failed: ${e.message}")
@@ -249,8 +271,12 @@ class WebDavSync(
         backupFile: File,
         config: WebDavConfig,
         includePlugins: Boolean = true
-    ) = withContext(Dispatchers.IO) {
+    ): RestoreSummary = withContext(Dispatchers.IO) {
         Log.i(TAG, "restoreFromBackupFile: Starting restore from ${backupFile.absolutePath}")
+
+        // 备份中数据库文件的存在情况 (诊断用)
+        var dbInBackup = false
+        var walInBackup = false
 
         ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
             var entry: ZipEntry?
@@ -274,6 +300,9 @@ class WebDavSync(
                         }
 
                         "rikka_hub.db", "rikka_hub-wal", "rikka_hub-shm" -> {
+                            // 记录备份里实际包含哪些数据库文件 (诊断用, 不受条目开关影响)
+                            if (zipEntry.name == "rikka_hub.db") dbInBackup = true
+                            if (zipEntry.name == "rikka_hub-wal") walInBackup = true
                             if (config.items.contains(WebDavConfig.BackupItem.DATABASE)) {
                                 // 不再直接覆盖数据库文件 (会导致 Room 迁移崩溃)
                                 // 而是将 db 文件解压到临时位置, 稍后读取 conversations 导入到当前数据库
@@ -285,7 +314,23 @@ class WebDavSync(
                                     pendingBackupDbFile = tempDbFile
                                     Log.i(TAG, "restoreFromBackupFile: Saved backup db to temp file")
                                 }
-                                // wal/shm 文件忽略, 只需要主 db 文件读取数据
+                                // WAL 必须与主库一起解压: WAL 模式下最近的写入 (包括新对话)
+                                // 都在 -wal 文件里, 主库可能还是未 checkpoint 的旧快照,
+                                // 只读主库会丢掉全部近期对话 ("导入成功但没有聊天记录"的根因).
+                                // 文件名遵循 SQLite 约定 (主库文件名 + "-wal"),
+                                // 后续 importConversationsFromBackupDb 打开时自动回放.
+                                if (zipEntry.name == "rikka_hub-wal") {
+                                    val tempWalFile = File(context.cacheDir, "temp_backup_rikka_hub.db-wal")
+                                    FileOutputStream(tempWalFile).use { outputStream ->
+                                        zipIn.copyTo(outputStream)
+                                    }
+                                    Log.i(
+                                        TAG,
+                                        "restoreFromBackupFile: Saved backup wal to temp file " +
+                                            "(${tempWalFile.length()} bytes)"
+                                    )
+                                }
+                                // shm 不需要: SQLite 打开时会自动重建
                             }
                         }
 
@@ -316,8 +361,8 @@ class WebDavSync(
                                             "restoreFromBackupFile: Restored ${zipEntry.name} (${targetFile.length()} bytes)"
                                         )
                                     } catch (e: Exception) {
-                                        Log.e(TAG, "restoreFromBackupFile: Failed to restore file ${zipEntry.name}", e)
-                                        throw Exception("Failed to restore file ${zipEntry.name}: ${e.message}")
+                                        // 单个文件失败跳过, 不中断整个恢复
+                                        Log.e(TAG, "restoreFromBackupFile: Failed to restore file ${zipEntry.name}, skip", e)
                                     }
                                 }
                             } else if (config.items.contains(WebDavConfig.BackupItem.FILES) &&
@@ -352,14 +397,19 @@ class WebDavSync(
         Log.i(TAG, "restoreFromBackupFile: Restore completed successfully")
 
         // 从备份数据库导入 conversations (不覆盖当前数据库, 避免 Room 迁移崩溃)
-        pendingBackupDbFile?.let { dbFile ->
+        val convSummary = pendingBackupDbFile?.let { dbFile ->
             try {
                 importConversationsFromBackupDb(dbFile)
             } finally {
                 dbFile.delete()
+                // 同步清理 wal/shm 临时文件, 避免残留干扰下次导入
+                File(dbFile.parentFile, dbFile.name + "-wal").delete()
+                File(dbFile.parentFile, dbFile.name + "-shm").delete()
                 pendingBackupDbFile = null
             }
         }
+        convSummary?.copy(dbInBackup = true, walInBackup = walInBackup)
+            ?: RestoreSummary(dbInBackup = dbInBackup, walInBackup = walInBackup)
     }
 
     /**
@@ -372,14 +422,31 @@ class WebDavSync(
             return
         }
 
+        // 先清掉上次导入可能残留的 shm (与本次 wal 不匹配会干扰回放)
+        File(backupDbFile.parentFile, backupDbFile.name + "-shm").delete()
+
+        // 用 READWRITE 打开: WAL 回放需要写 shm 文件, 只读打开带 wal 的库
+        // 会直接报错. 打开后 SQLite 首次读取时自动回放 WAL,
+        // 主库 + WAL 里的对话都能查到.
         val sqliteDb = try {
             android.database.sqlite.SQLiteDatabase.openDatabase(
                 backupDbFile.absolutePath, null,
-                android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE
             )
         } catch (e: Exception) {
-            Log.e(TAG, "importConversations: failed to open backup db", e)
-            return
+            // WAL 损坏等极端情况: 删掉 wal/shm 退回只读打开 (旧行为兜底, 至少保住主库数据)
+            Log.e(TAG, "importConversations: failed to open db with wal, fallback to main db only", e)
+            File(backupDbFile.parentFile, backupDbFile.name + "-wal").delete()
+            File(backupDbFile.parentFile, backupDbFile.name + "-shm").delete()
+            try {
+                android.database.sqlite.SQLiteDatabase.openDatabase(
+                    backupDbFile.absolutePath, null,
+                    android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+                )
+            } catch (e2: Exception) {
+                Log.e(TAG, "importConversations: failed to open backup db", e2)
+                return
+            }
         }
 
         try {
@@ -611,8 +678,9 @@ class WebDavSync(
             }
             Log.i(TAG, "restoreFromBackupFile: Restored plugin file $entryName (${targetFile.length()} bytes)")
         } catch (e: Exception) {
-            Log.e(TAG, "restoreFromBackupFile: Failed to restore plugin file $entryName", e)
-            throw Exception("Failed to restore plugin file $entryName: ${e.message}")
+            // 插件文件恢复失败不中断整个恢复 (典型场景: 未授予所有文件访问权限时 EACCES).
+            // 聊天记录和设置的恢复优先级更高; 失败的插件文件记日志跳过.
+            Log.e(TAG, "restoreFromBackupFile: Failed to restore plugin file $entryName, skip", e)
         }
     }
 
@@ -628,9 +696,16 @@ class WebDavSync(
 
         val skillsRoot = File(context.filesDir, FileFolders.SKILLS).apply { mkdirs() }
         val skillDir = SkillPaths.resolveSkillDir(skillsRoot, skillName)
-            ?: throw Exception("Invalid skill directory: $entryName")
+        if (skillDir == null) {
+            // 无效路径跳过而不是中断, 聊天记录恢复优先
+            Log.e(TAG, "restoreFromBackupFile: Invalid skill directory $entryName, skip")
+            return
+        }
         val targetFile = SkillPaths.resolveSkillFile(skillDir, skillRelativePath)
-            ?: throw Exception("Invalid skill file path: $entryName")
+        if (targetFile == null) {
+            Log.e(TAG, "restoreFromBackupFile: Invalid skill file path $entryName, skip")
+            return
+        }
 
         skillDir.mkdirs()
         targetFile.parentFile?.mkdirs()
@@ -641,8 +716,8 @@ class WebDavSync(
             }
             Log.i(TAG, "restoreFromBackupFile: Restored skill file $entryName (${targetFile.length()} bytes)")
         } catch (e: Exception) {
-            Log.e(TAG, "restoreFromBackupFile: Failed to restore skill file $entryName", e)
-            throw Exception("Failed to restore skill file $entryName: ${e.message}")
+            // 技能文件恢复失败不中断整个恢复, 记日志跳过
+            Log.e(TAG, "restoreFromBackupFile: Failed to restore skill file $entryName, skip", e)
         }
     }
 

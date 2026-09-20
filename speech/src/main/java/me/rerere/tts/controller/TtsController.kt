@@ -54,18 +54,16 @@ class TtsController(
     private var isPaused = false
 
     // 队列与缓存
-    // 缓存 key 改为文本内容: 同一段文字无论被 enqueue 多少次, 只合成一次, 避免重复请求.
+    // 缓存 key 为 "provider id + 文本内容": 同一段文字无论被 enqueue 多少次只合成一次,
+    // 且切换 provider 后不会错误命中旧 provider 的音频.
     private val queue: java.util.concurrent.ConcurrentLinkedQueue<TtsChunk> = java.util.concurrent.ConcurrentLinkedQueue()
     private val allChunks: MutableList<TtsChunk> = mutableListOf()
     private val cache = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<TTSResponse>>()
-    // 已入队的文本集合, 用于内容级去重: 同一段文字不会被重复加入播放队列.
-    private val queuedTexts: java.util.concurrent.ConcurrentHashMap.KeySetView<String, Boolean> =
-        java.util.concurrent.ConcurrentHashMap.newKeySet()
     private var lastPrefetchedIndex: Int = -1
 
     // 行为参数
-    private val chunkDelayMs = 120L
-    private val prefetchCount = 4
+    // 预取窗口: 流式场景下按句批量入队, 窗口太小会导致 worker 现场等网络合成 → 播放静音间隙
+    private val prefetchCount = 8
 
     // 状态流（保留与旧版兼容的 StateFlow）
     private val _isAvailable = MutableStateFlow(false)
@@ -100,6 +98,8 @@ class TtsController(
                 }
             }
         }
+        // 播放器推进到第 N 个分片时同步"当前分片" (1-based)
+        audio.onItemStarted = { index -> _currentChunk.update { index + 1 } }
     }
 
     /** 选择/取消选择 Provider */
@@ -113,8 +113,10 @@ class TtsController(
      * 朗读文本
      * - flush=true: 清空当前进度并重新开始
      * - flush=false: 继续队列，追加朗读
+     * - dedupe=true: 只对"尚未播放的排队内容"去重, 已播过的文字允许再次入队
+     *   (重播场景传 dedupe=false)
      */
-    fun speak(text: String, flush: Boolean = true) {
+    fun speak(text: String, flush: Boolean = true, dedupe: Boolean = true) {
         if (text.isBlank()) return
         val provider = currentProvider
         if (provider == null) {
@@ -129,9 +131,16 @@ class TtsController(
             internalReset()
         }
 
-        // 内容级去重: 跳过文本已经在队列中的 chunk, 避免同一段文字被重复合成/播放.
-        val dedupedChunks = newChunks.filter { chunk ->
-            queuedTexts.add(chunk.text) // add 返回 true 表示之前不存在, 即未重复
+        // 内容级去重: 只跳过"文本与队列中尚未播放的 chunk 重复"的分片,
+        // 防止流式场景同一段文字被重复加入播放队列.
+        // 注意不去重"已播放过"的内容 — 否则同一轮里 AI 重复的句子第二遍会无声,
+        // 字幕历史的"重播语音"也会被吞掉.
+        val pendingTexts = HashSet<String>()
+        queue.forEach { pendingTexts.add(it.text) }
+        val dedupedChunks = if (dedupe) {
+            newChunks.filter { chunk -> pendingTexts.add(chunk.text) }
+        } else {
+            newChunks
         }
         if (dedupedChunks.isEmpty()) return
 
@@ -144,7 +153,9 @@ class TtsController(
         if (flush) {
             _currentChunk.update { 0 }
         }
-        _totalChunks.update { queue.size }
+        // totalChunks 语义为"本会话累计入队分片数", 只增不减,
+        // 修复旧版 worker 里用 queue.size 反复改小 total 导致 current > total 的显示错乱
+        _totalChunks.update { allChunks.size }
         _error.update { null }
 
         _playbackState.update {
@@ -156,7 +167,7 @@ class TtsController(
         }
 
         if (workerJob?.isActive != true) startWorker()
-        prefetchFrom((_currentChunk.value).coerceAtLeast(0))
+        prefetchFrom(0)
     }
 
     private fun internalReset() {
@@ -167,7 +178,6 @@ class TtsController(
         isPaused = false
         queue.clear()
         allChunks.clear()
-        queuedTexts.clear()
         cache.values.forEach { it.cancel(CancellationException("Reset")) }
         cache.clear()
         lastPrefetchedIndex = -1
@@ -202,11 +212,15 @@ class TtsController(
         audio.setSpeed(speed)
     }
 
+    /** 外放路由开关 (true=扬声器, false=听筒) */
+    fun setSpeakerphone(enabled: Boolean) {
+        audio.setSpeakerphone(enabled)
+    }
+
     /** 跳过下一段（不打断当前正在播放） */
     fun skipNext() {
         if (queue.isNotEmpty()) {
             queue.poll()
-            _totalChunks.update { queue.size }
         }
     }
 
@@ -218,7 +232,6 @@ class TtsController(
         isPaused = false
         queue.clear()
         allChunks.clear()
-        queuedTexts.clear()
         cache.values.forEach { it.cancel(CancellationException("Stopped")) }
         cache.clear()
         lastPrefetchedIndex = -1
@@ -245,7 +258,6 @@ class TtsController(
 
         workerJob = scope.launch {
             _isSpeaking.update { true }
-            var processedCount = _currentChunk.value
             try {
                 while (isActive) {
                     if (isPaused) {
@@ -253,32 +265,43 @@ class TtsController(
                         continue
                     }
 
-                    val chunk = queue.poll() ?: break
-
-                    // 更新状态（1-based）
-                    _currentChunk.update { processedCount + 1 }
-                    _totalChunks.update { queue.size + 1 }
-                    _playbackState.update {
-                        it.copy(
-                            currentChunkIndex = _currentChunk.value,
-                            totalChunks = _totalChunks.value
-                        )
+                    val chunk = queue.poll()
+                    if (chunk == null) {
+                        // 合成队列空了, 但播放列表里可能还有音频在放:
+                        // 等它排空再退出, 避免提前置 Ended 把后续内容误判成"播完了"
+                        if (audio.hasPendingAudio()) {
+                            delay(100)
+                            continue
+                        }
+                        // 流式场景 (语音通话) 下一批句子可能稍后才 enqueue,
+                        // 立即退出会导致 worker 反复重启, 且 finally 里上报的
+                        // Ended 是假信号. 宽限 600ms 后再确认一次才真正退出.
+                        delay(600)
+                        if (queue.isNotEmpty() || audio.hasPendingAudio()) continue
+                        break
                     }
-
-                    // 预取下一窗口
-                    prefetchFrom(chunk.index + 1)
 
                     val response = try {
                         awaitOrCreate(chunk, provider)
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
-                        Log.e(TAG, "Synthesis error", e)
-                        _error.update { e.message ?: "TTS synthesis error" }
-                        processedCount++
-                        continue
+                        // 合成失败: 清掉失败的缓存结果并重试一次,
+                        // 之前直接 continue 会静默丢掉这段内容 ("没读完就停了"的主因之一)
+                        Log.e(TAG, "Synthesis error (first attempt), retrying", e)
+                        cache.remove(cacheKey(provider, chunk.text))
+                        try {
+                            delay(300)
+                            awaitOrCreate(chunk, provider)
+                        } catch (retryErr: Exception) {
+                            if (retryErr is CancellationException) throw retryErr
+                            Log.e(TAG, "Synthesis retry failed, skip chunk", retryErr)
+                            _error.update { retryErr.message ?: "TTS synthesis error" }
+                            continue
+                        }
                     }
 
-                    // 播放
+                    // 入队播放 (fire-and-forget), 由 AudioPlayer 的播放列表无缝衔接.
+                    // 不再等当前分片播完才处理下一个, 消除分片间的 re-prepare 停顿.
                     try {
                         audio.play(response)
                     } catch (e: Exception) {
@@ -286,14 +309,13 @@ class TtsController(
                         Log.e(TAG, "Playback error", e)
                         _error.update { e.message ?: "Audio playback error" }
                     }
-
-                    if (queue.isNotEmpty()) delay(chunkDelayMs)
-
-                    processedCount++
                 }
             } finally {
                 _isSpeaking.update { false }
-                if (queue.isEmpty()) {
+                // 只有"自然播完退出"才上报 Ended; 被 stop()/internalReset() cancel 的
+                // worker 不能写 Ended, 否则会晚于 stop() 的 Idle 写入, 把状态覆盖掉,
+                // 下一轮 waitForTtsToFinish 看到 Ended 会误判"已经播完"提前收尾.
+                if (isActive && queue.isEmpty() && !audio.hasPendingAudio()) {
                     _playbackState.update { it.copy(status = PlaybackStatus.Ended) }
                 }
             }
@@ -308,23 +330,21 @@ class TtsController(
 
         for (i in begin until endExclusive) {
             val chunk = allChunks.getOrNull(i) ?: continue
-            // 缓存 key 用文本内容: 同一段文字只合成一次, 即使来自不同 chunk 实例.
-            cache.computeIfAbsent(chunk.text) {
+            // 缓存 key 用 "provider id + 文本内容": 只合成一次, 且不受 provider 切换影响
+            cache.computeIfAbsent(cacheKey(provider, chunk.text)) {
                 scope.async(Dispatchers.IO) { synthesizer.synthesize(provider, chunk) }
             }
         }
         lastPrefetchedIndex = endExclusive - 1
     }
 
+    private fun cacheKey(provider: TTSProviderSetting, text: String): String = "${provider.id}:$text"
+
     private suspend fun awaitOrCreate(chunk: TtsChunk, provider: TTSProviderSetting): TTSResponse {
-        val deferred = cache.computeIfAbsent(chunk.text) {
+        val deferred = cache.computeIfAbsent(cacheKey(provider, chunk.text)) {
             scope.async(Dispatchers.IO) { synthesizer.synthesize(provider, chunk) }
         }
-        return try {
-            deferred.await()
-        } finally {
-            // 可按需保留缓存（此处保留，便于重播/重试）
-        }
+        return deferred.await()
     }
     // endregion
 }
