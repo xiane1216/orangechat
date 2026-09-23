@@ -9,12 +9,9 @@ package me.rerere.rikkahub.ui.pages.chat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
 import me.rerere.rikkahub.data.datastore.Settings
@@ -29,30 +26,17 @@ fun AssistantBackground(setting: Settings) {
     when {
         assistant.background != null -> {
             // 用户手动为助手设置的背景图，优先级最高
-            val backgroundColor = chatBackgroundColor ?: MaterialTheme.colorScheme.background
+            // 直接显示原图，不再叠加主题色渐变遮罩（浅色模式会导致背景图发白、深色模式发黑）
+            // 如需调节背景浓淡，使用助手设置里的"背景不透明度"滑条
             val backgroundOpacity = assistant.backgroundOpacity.coerceIn(0f, 1f)
-            Box {
-                AsyncImage(
-                    model = assistant.background,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .alpha(backgroundOpacity)
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    backgroundColor.copy(alpha = 0.2f),
-                                    backgroundColor.copy(alpha = 0.5f)
-                                )
-                            )
-                        )
-                )
-            }
+            AsyncImage(
+                model = assistant.background,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(backgroundOpacity)
+            )
         }
 
         chatBackgroundColor != null -> {
