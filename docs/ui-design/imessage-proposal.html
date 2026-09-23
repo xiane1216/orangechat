@@ -168,8 +168,8 @@ body {
 }
 .group.them .bubble { background: var(--them-bubble); color: var(--them-text); }
 .group.me .bubble { background: var(--me-bubble); color: var(--me-text); }
-.group.them .bubble.last { border-bottom-left-radius: 5px; }
-.group.me .bubble.last { border-bottom-right-radius: 5px; }
+.group.them .bubble.first { border-bottom-left-radius: 5px; }
+.group.me .bubble.first { border-bottom-right-radius: 5px; }
 @media (prefers-reduced-motion: no-preference) {
   .bubble { transition: transform 120ms ease, opacity 120ms ease, background 320ms ease; }
   .bubble:active { transform: scale(0.97); opacity: 0.85; }
@@ -429,8 +429,8 @@ body {
   <div class="chat" id="chat">
     <!-- AI 一轮回复：拆成多条气泡，✦ 挂在整轮末尾 -->
     <div class="group them">
-      <div class="bubble" data-msg>早上好～昨晚挂 VPN 之后补传成功了吗？</div>
-      <div class="bubble first" data-msg>断网那几条重试队列应该也自动补上了。</div>
+      <div class="bubble first" data-msg>早上好～昨晚挂 VPN 之后补传成功了吗？</div>
+      <div class="bubble" data-msg>断网那几条重试队列应该也自动补上了。</div>
       <div class="r-body">
         <span class="r-sec">思考</span>
         <span class="r-text">用户早上来汇报补传结果……结合昨晚 612 条的量，确认去重和分批逻辑是否正常。</span>
@@ -442,14 +442,14 @@ body {
 
     <!-- 用户一次发送拆三条 -->
     <div class="group me">
-      <div class="bubble" data-msg>成功了！</div>
+      <div class="bubble first" data-msg>成功了！</div>
       <div class="bubble" data-msg>挂了 VPN 点补传</div>
-      <div class="bubble first" data-msg>对了，上面的「壁纸」按钮点开试试</div>
+      <div class="bubble" data-msg>对了，上面的「壁纸」按钮点开试试</div>
     </div>
 
     <div class="group them">
-      <div class="bubble" data-msg>好呀，开了壁纸再开「透明气泡」，我的气泡会直接透出背景的色系～</div>
-      <div class="bubble first" data-msg>顶部和输入框也会跟着变成磨砂玻璃，浮在背景上。</div>
+      <div class="bubble first" data-msg>好呀，开了壁纸再开「透明气泡」，我的气泡会直接透出背景的色系～</div>
+      <div class="bubble" data-msg>顶部和输入框也会跟着变成磨砂玻璃，浮在背景上。</div>
       <div class="r-body">
         <span class="r-sec">思考</span>
         <span class="r-text">演示 iMessage 透明气泡：rgba 半透明底 + backdrop-blur，背景色系透进气泡。</span>
@@ -664,11 +664,11 @@ body {
     setTimeout(function () {
       gT.innerHTML = '';
       var r1 = document.createElement('div');
-      r1.className = 'bubble';
+      r1.className = 'bubble first';
       r1.dataset.msg = '';
       r1.textContent = '这是演示回复，一轮可以拆成多条气泡，';
       var r2 = document.createElement('div');
-      r2.className = 'bubble first';
+      r2.className = 'bubble';
       r2.dataset.msg = '';
       r2.textContent = '思考链和工具调用都收在 ✦ 里～';
       var rb = document.createElement('div');
