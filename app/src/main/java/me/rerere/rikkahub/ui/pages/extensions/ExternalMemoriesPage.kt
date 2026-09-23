@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
@@ -51,9 +52,11 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Brain01
+import me.rerere.hugeicons.stroke.DatabaseRestore
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.MoreVertical
+import me.rerere.hugeicons.stroke.SecurityCheck
 import me.rerere.rikkahub.data.model.ExternalMemory
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -65,10 +68,12 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun ExternalMemoriesPage(vm: ExternalMemoriesVM = koinViewModel()) {
     val settings = vm.settings.collectAsStateWithLifecycle().value
+    val opState = vm.opState.collectAsStateWithLifecycle().value
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var editTarget by remember { mutableStateOf<ExternalMemory?>(null) }
     var deleteTarget by remember { mutableStateOf<ExternalMemory?>(null) }
+    var backfillTarget by remember { mutableStateOf<ExternalMemory?>(null) }
 
     Scaffold(
         topBar = {
@@ -117,10 +122,17 @@ fun ExternalMemoriesPage(vm: ExternalMemoriesVM = koinViewModel()) {
             }
 
             items(settings.externalMemories, key = { it.id }) { memory ->
+                val assistantNames = settings.assistants
+                    .filter { memory.id in it.externalMemoryIds }
+                    .map { it.name.ifBlank { "未命名助手" } }
                 ExternalMemoryItem(
                     memory = memory,
+                    assistantNames = assistantNames,
+                    op = opState?.takeIf { it.memoryId == memory.id },
                     onEdit = { editTarget = memory },
                     onDelete = { deleteTarget = memory },
+                    onTestWrite = { vm.testWrite(memory) },
+                    onBackfill = { backfillTarget = memory },
                 )
             }
         }
@@ -174,13 +186,129 @@ fun ExternalMemoriesPage(vm: ExternalMemoriesVM = koinViewModel()) {
             }
         )
     }
+
+    // 补传历史消息：选择日期范围
+    backfillTarget?.let { target ->
+        BackfillRangeDialog(
+            onDismiss = { backfillTarget = null },
+            onConfirm = { start, end ->
+                backfillTarget = null
+                vm.backfillHistory(target, start, end)
+            }
+        )
+    }
+
+    // 测试写入 / 补传 结果
+    opState?.let { op ->
+        if (!op.running && op.message != null) {
+            AlertDialog(
+                onDismissRequest = { vm.clearOp() },
+                title = {
+                    Text(
+                        when (op.type) {
+                            ExternalMemoryOpType.TestWrite -> "测试写入"
+                            ExternalMemoryOpType.Backfill -> "补传历史消息"
+                        }
+                    )
+                },
+                text = { Text(op.message) },
+                confirmButton = {
+                    TextButton(onClick = { vm.clearOp() }) {
+                        Text("确定")
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun BackfillRangeDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (startDate: String, endDate: String) -> Unit,
+) {
+    val today = java.time.LocalDate.now()
+    var start by rememberSaveable { mutableStateOf(today.minusDays(6).toString()) }
+    var end by rememberSaveable { mutableStateOf(today.toString()) }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("补传历史消息") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "将所选日期范围内、关联此记忆库的助手的聊天记录补传到 Supabase，" +
+                        "保留消息原始时间戳；远端已有的记录会自动跳过，可重复执行。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = start,
+                    onValueChange = { start = it; error = null },
+                    label = { Text("开始日期 (yyyy-MM-dd)") },
+                    singleLine = true,
+                    isError = error != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = end,
+                    onValueChange = { end = it; error = null },
+                    label = { Text("结束日期 (yyyy-MM-dd)") },
+                    singleLine = true,
+                    isError = error != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (error != null) {
+                    Text(
+                        text = error!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val s = start.trim()
+                    val e = end.trim()
+                    val datesValid = try {
+                        java.time.LocalDate.parse(s)
+                        java.time.LocalDate.parse(e)
+                        true
+                    } catch (ex: Exception) {
+                        false
+                    }
+                    if (datesValid && s <= e) {
+                        onConfirm(s, e)
+                    } else {
+                        error = "日期格式应为 yyyy-MM-dd，且开始日期不能晚于结束日期"
+                    }
+                }
+            ) {
+                Text("开始补传")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 @Composable
 private fun ExternalMemoryItem(
     memory: ExternalMemory,
+    assistantNames: List<String>,
+    op: ExternalMemoryOpState?,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onTestWrite: () -> Unit,
+    onBackfill: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -219,6 +347,15 @@ private fun ExternalMemoryItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
+                Text(
+                    text = if (assistantNames.isEmpty()) "未关联助手"
+                    else "关联助手: ${assistantNames.joinToString("、")}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -230,6 +367,25 @@ private fun ExternalMemoryItem(
                     }
                     FeatureChip("召回 ${memory.recallCount} 条")
                 }
+
+                if (op?.running == true) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Text(
+                            text = op.message ?: "处理中…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
 
             Box {
@@ -240,6 +396,22 @@ private fun ExternalMemoryItem(
                     expanded = expanded,
                     onDismissRequest = { expanded = false }
                 ) {
+                    DropdownMenuItem(
+                        text = { Text("测试写入") },
+                        leadingIcon = { Icon(HugeIcons.SecurityCheck, null) },
+                        onClick = {
+                            expanded = false
+                            onTestWrite()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("补传历史消息") },
+                        leadingIcon = { Icon(HugeIcons.DatabaseRestore, null) },
+                        onClick = {
+                            expanded = false
+                            onBackfill()
+                        }
+                    )
                     DropdownMenuItem(
                         text = { Text("编辑") },
                         leadingIcon = { Icon(HugeIcons.Edit01, null) },

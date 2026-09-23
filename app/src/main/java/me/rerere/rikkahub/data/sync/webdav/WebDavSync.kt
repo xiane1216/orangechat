@@ -17,6 +17,7 @@ import me.rerere.rikkahub.data.files.SkillPaths
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.WebDavConfig
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
 import me.rerere.rikkahub.plugin.repository.PluginRepository
 import me.rerere.rikkahub.plugin.repository.PluginSettingsExport
@@ -156,7 +157,7 @@ class WebDavSync(
         try {
             // 本地文件导入是用户明确选择的完整备份, 不受 WebDAV 同步条目开关的限制,
             // 恢复 zip 中存在的全部内容 (条目开关只应影响 WebDAV/S3 自动备份的导出范围)
-            val fullConfig = config.copy(items = WebDavConfig.BackupItem.entries.toSet())
+            val fullConfig = config.copy(items = WebDavConfig.BackupItem.entries.toList())
             val summary = restoreFromBackupFile(file, fullConfig, includePlugins = true)
             Log.i(TAG, "restoreFromLocalFile: Restore completed successfully")
             summary
@@ -415,11 +416,14 @@ class WebDavSync(
     /**
      * 从备份数据库文件中读取 conversations 并导入到当前数据库.
      * 不直接覆盖数据库文件, 避免 Room 版本迁移导致崩溃.
+     *
+     * @return RestoreSummary 导入统计 (检测/导入/跳过/失败条数、助手分布等),
+     *         供上层向用户展示恢复详情, 诊断"恢复成功但聊天记录不见了"之类的问题.
      */
-    private suspend fun importConversationsFromBackupDb(backupDbFile: File) {
+    private suspend fun importConversationsFromBackupDb(backupDbFile: File): RestoreSummary {
         if (!backupDbFile.exists()) {
             Log.w(TAG, "importConversations: backup db file not found")
-            return
+            return RestoreSummary()
         }
 
         // 先清掉上次导入可能残留的 shm (与本次 wal 不匹配会干扰回放)
@@ -445,7 +449,7 @@ class WebDavSync(
                 )
             } catch (e2: Exception) {
                 Log.e(TAG, "importConversations: failed to open backup db", e2)
-                return
+                return RestoreSummary()
             }
         }
 
@@ -457,7 +461,7 @@ class WebDavSync(
             val hasTable = tableCursor.use { it.moveToFirst() && it.count > 0 }
             if (!hasTable) {
                 Log.w(TAG, "importConversations: conversationentity table not found in backup")
-                return
+                return RestoreSummary()
             }
 
             // 获取列名, 兼容旧版 schema (可能缺少 folder_id 等列)
@@ -484,10 +488,16 @@ class WebDavSync(
             val convCursor = sqliteDb.rawQuery("SELECT * FROM conversationentity", null)
             var importedCount = 0
             var skippedCount = 0
+            var failedCount = 0
+            var detectedCount = 0
+            var folderedCount = 0
+            var firstError: String? = null
+            val assistantCounts = mutableMapOf<String, Int>()
 
             convCursor.use {
                 while (it.moveToNext()) {
                     try {
+                        detectedCount++
                         val id = it.getString(it.getColumnIndexOrThrow("id"))
                         val assistantId = it.getString(it.getColumnIndexOrThrow("assistant_id"))
                         val title = it.getString(it.getColumnIndexOrThrow("title"))
@@ -506,6 +516,9 @@ class WebDavSync(
                         val folderId = if (columns.contains("folder_id")) {
                             it.getString(it.getColumnIndexOrThrow("folder_id")) ?: ""
                         } else ""
+
+                        assistantCounts.merge(assistantId, 1, Int::plus)
+                        if (folderId.isNotEmpty()) folderedCount++
 
                         // 检查是否已存在
                         if (conversationRepository.existsConversationById(
@@ -542,12 +555,34 @@ class WebDavSync(
                         conversationRepository.insertConversation(conversation)
                         importedCount++
                     } catch (e: Exception) {
+                        failedCount++
+                        if (firstError == null) firstError = e.message ?: e.toString()
                         Log.e(TAG, "importConversations: failed to import conversation", e)
                     }
                 }
             }
 
-            Log.i(TAG, "importConversations: imported $importedCount, skipped $skippedCount")
+            Log.i(TAG, "importConversations: detected $detectedCount, imported $importedCount, skipped $skippedCount, failed $failedCount")
+
+            // 备份对话所属助手的名字分布 (找不到的助手显示 ID, 提示用户助手缺失)
+            val settings = settingsStore.settingsFlow.value
+            val assistantNames = settings.assistants.associate { it.id.toString() to it.name.ifBlank { "未命名助手" } }
+            val distribution = assistantCounts.entries
+                .sortedByDescending { it.value }
+                .map { (id, count) -> (assistantNames[id] ?: "未知助手($id)") to count }
+
+            return RestoreSummary(
+                detected = detectedCount,
+                imported = importedCount,
+                skipped = skippedCount,
+                failed = failedCount,
+                firstError = firstError,
+                folderedCount = folderedCount,
+                assistantDistribution = distribution,
+                currentAssistantName = runCatching {
+                    settings.getCurrentAssistant().name.ifBlank { "未命名助手" }
+                }.getOrNull(),
+            )
         } finally {
             sqliteDb.close()
         }

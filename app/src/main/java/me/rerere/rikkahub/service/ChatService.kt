@@ -429,20 +429,25 @@ class ChatService(
 
                 // 读取最新状态 -> 追加用户消息 -> 落库，整体加锁。
                 // 防止跟同一时刻可能在跑的标题生成/建议生成/语音通话挂断反馈互相覆盖对方刚写入的消息。
-                val (assistant, processedContent) = session.saveMutex.withLock {
+                val (assistant, processedContent, userMessageCreatedAt) = session.saveMutex.withLock {
                     val latestConversation = session.state.value
                     val assistant = settings.getAssistantById(latestConversation.assistantId)
                         ?: settings.getCurrentAssistant()
                     val processedContent = preprocessUserInputParts(content, assistant)
 
+                    val userMessage = UIMessage(
+                        role = MessageRole.USER,
+                        parts = processedContent,
+                    )
                     val newConversation = latestConversation.copy(
-                        messageNodes = latestConversation.messageNodes + UIMessage(
-                            role = MessageRole.USER,
-                            parts = processedContent,
-                        ).toMessageNode(),
+                        messageNodes = latestConversation.messageNodes + userMessage.toMessageNode(),
                     )
                     saveConversation(conversationId, newConversation)
-                    assistant to processedContent
+                    Triple(
+                        assistant,
+                        processedContent,
+                        me.rerere.rikkahub.data.service.formatSupabaseTimestamp(userMessage.createdAt),
+                    )
                 }
 
                 // 触发 message_sent 事件钩子
@@ -488,16 +493,28 @@ class ChatService(
                         }.joinToString("\n")
                         externalMemoryConfigs.forEach { config ->
                             appScope.launch {
-                                runCatching {
-                                    val service = me.rerere.rikkahub.data.service.ExternalMemoryService(config)
-                                    service.saveMessage(
-                                        assistantId = assistant.id.toString(),
-                                        conversationId = conversationId.toString(),
-                                        role = "user",
-                                        content = messageText,
-                                    )
-                                }.onFailure {
-                                    Log.w(TAG, "Failed to save user message to external memory ${config.name}", it)
+                                // 保存失败（如断网）时入队自动重试，原始时间戳随消息保留
+                                val result = me.rerere.rikkahub.data.service.ExternalMemoryService(config).saveMessage(
+                                    assistantId = assistant.id.toString(),
+                                    conversationId = conversationId.toString(),
+                                    role = "user",
+                                    content = messageText,
+                                    originalCreatedAt = userMessageCreatedAt,
+                                )
+                                if (result.isFailure) {
+                                    Log.w(TAG, "Failed to save user message to external memory ${config.name}", result.exceptionOrNull())
+                                    runCatching {
+                                        me.rerere.rikkahub.data.service.ExternalMemoryRetryQueue.enqueue(
+                                            config = config,
+                                            assistantId = assistant.id.toString(),
+                                            conversationId = conversationId.toString(),
+                                            role = "user",
+                                            content = messageText,
+                                            originalCreatedAt = userMessageCreatedAt,
+                                        )
+                                    }.onFailure {
+                                        Log.w(TAG, "Failed to enqueue user message retry", it)
+                                    }
                                 }
                             }
                         }
@@ -1074,6 +1091,8 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
             }
 
             // 保存 AI 回复到外置记忆库
+            // 与用户消息一致：appScope.launch fire-and-forget，不随本条消息的 job 取消而中断；
+            // 失败时入队自动重试，并携带消息原始时间戳。
             try {
                 val externalMemoryConfigs = settings.externalMemories.filter {
                     it.enabled && it.id in assistant.externalMemoryIds && it.autoSaveMessages
@@ -1081,20 +1100,32 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
                 if (externalMemoryConfigs.isNotEmpty()) {
                     val lastAssistantMessage = finalConversation.currentMessages.lastOrNull { it.role == MessageRole.ASSISTANT }
                     val messageText = lastAssistantMessage?.toText() ?: ""
+                    val assistantMessageCreatedAt = lastAssistantMessage?.let {
+                        me.rerere.rikkahub.data.service.formatSupabaseTimestamp(it.createdAt)
+                    }
                     if (messageText.isNotBlank()) {
-                        kotlinx.coroutines.coroutineScope {
-                            externalMemoryConfigs.forEach { config ->
-                                launch {
+                        externalMemoryConfigs.forEach { config ->
+                            appScope.launch {
+                                val result = me.rerere.rikkahub.data.service.ExternalMemoryService(config).saveMessage(
+                                    assistantId = assistant.id.toString(),
+                                    conversationId = conversationId.toString(),
+                                    role = "assistant",
+                                    content = messageText,
+                                    originalCreatedAt = assistantMessageCreatedAt,
+                                )
+                                if (result.isFailure) {
+                                    Log.w(TAG, "Failed to save assistant message to external memory ${config.name}", result.exceptionOrNull())
                                     runCatching {
-                                        val service = me.rerere.rikkahub.data.service.ExternalMemoryService(config)
-                                        service.saveMessage(
+                                        me.rerere.rikkahub.data.service.ExternalMemoryRetryQueue.enqueue(
+                                            config = config,
                                             assistantId = assistant.id.toString(),
                                             conversationId = conversationId.toString(),
                                             role = "assistant",
                                             content = messageText,
+                                            originalCreatedAt = assistantMessageCreatedAt,
                                         )
                                     }.onFailure {
-                                        Log.w(TAG, "Failed to save assistant message to external memory ${config.name}", it)
+                                        Log.w(TAG, "Failed to enqueue assistant message retry", it)
                                     }
                                 }
                             }

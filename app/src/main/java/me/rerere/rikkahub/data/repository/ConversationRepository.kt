@@ -589,7 +589,78 @@ class ConversationRepository(
 
         result.sortedBy { it.date }
     }
+
+    /**
+     * 获取指定日期范围内、可直接补传到外置记忆库（进阶记忆/Supabase）的消息。
+     *
+     * - 只包含 user / assistant 角色
+     * - content 提取方式与 ChatService 实时保存时完全一致
+     *   （user: Text parts join "\n"；assistant: toText()），
+     *   保证补传前的去重能和远端已有记录对上，不会重复插入
+     * - createdAt 为本地时区 "yyyy-MM-dd HH:mm:ss"，与实时保存写入的格式一致
+     * - 返回结果按时间升序排列
+     */
+    suspend fun getBackfillMessages(startDate: String, endDate: String): List<BackfillMessage> =
+        withContext(Dispatchers.IO) {
+            val result = mutableListOf<BackfillMessage>()
+
+            for (conversationId in conversationDAO.getAllIds()) {
+                val assistantId = try {
+                    conversationDAO.getConversationById(conversationId)?.assistantId ?: continue
+                } catch (e: Exception) {
+                    Log.e(TAG, "getBackfillMessages: failed to get conversation, id=$conversationId", e)
+                    continue
+                }
+
+                val nodes = try {
+                    loadMessageNodes(conversationId)
+                } catch (e: Exception) {
+                    Log.e(TAG, "getBackfillMessages: failed to load nodes, conversationId=$conversationId", e)
+                    continue
+                }
+
+                for (node in nodes) {
+                    // 只取选中的消息（对应 selectIndex），与 UI 展示/实时保存的范围一致
+                    val message = node.messages.getOrNull(node.selectIndex) ?: continue
+                    val role = message.role.name.lowercase()
+                    if (role != "user" && role != "assistant") continue
+
+                    val dateStr = message.createdAt.toString().take(10) // yyyy-MM-dd
+                    if (dateStr < startDate || dateStr > endDate) continue
+
+                    val content = if (role == "user") {
+                        message.parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
+                    } else {
+                        message.toText()
+                    }
+                    if (content.isBlank()) continue
+
+                    result.add(
+                        BackfillMessage(
+                            assistantId = assistantId,
+                            conversationId = conversationId,
+                            role = role,
+                            content = content,
+                            createdAt = me.rerere.rikkahub.data.service.formatSupabaseTimestamp(message.createdAt),
+                        )
+                    )
+                }
+            }
+
+            result.sortedBy { it.createdAt }
+        }
 }
+
+/**
+ * 可补传到外置记忆库的一条消息（带助手ID与原始时间戳）
+ */
+data class BackfillMessage(
+    val assistantId: String,
+    val conversationId: String,
+    val role: String,
+    val content: String,
+    val createdAt: String,
+)
 
 /**
  * 带日期的聊天记录条目（用于日记总结）

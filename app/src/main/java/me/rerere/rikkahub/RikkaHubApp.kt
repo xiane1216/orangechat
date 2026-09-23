@@ -60,6 +60,7 @@ const val MUSIC_PLAYER_NOTIFICATION_CHANNEL_ID = "music_player"
 const val DEVICE_EVENT_NOTIFICATION_CHANNEL_ID = "device_event_tracking"
 const val VOICE_CALL_NOTIFICATION_CHANNEL_ID = "voice_call"
 const val ANNOUNCEMENT_NOTIFICATION_CHANNEL_ID = "announcement"
+const val EXTERNAL_MEMORY_NOTIFICATION_CHANNEL_ID = "external_memory_sync"
 
 class RikkaHubApp : Application() {
     companion object {
@@ -77,6 +78,18 @@ class RikkaHubApp : Application() {
             modules(appModule, viewModelModule, dataSourceModule, repositoryModule, pluginModule)
         }
         this.createNotificationChannel()
+
+        // 初始化进阶记忆（外置记忆库）保存失败自动重试队列：
+        // 加载上次未同步成功的持久化队列并恢复重试循环（须在通知渠道创建之后）
+        runCatching {
+            me.rerere.rikkahub.data.service.ExternalMemoryRetryQueue.init(
+                context = this,
+                settingsStore = get(),
+                scope = get(),
+            )
+        }.onFailure { e ->
+            android.util.Log.e(TAG, "Failed to init external memory retry queue", e)
+        }
 
         // 预热 ChatService 单例: 强制在主线程(Application.onCreate 由 Android 保证
         // 在主线程执行, 且先于同一进程内任何 Service/BroadcastReceiver/Activity 回调)
@@ -347,6 +360,13 @@ class RikkaHubApp : Application() {
             .setVibrationEnabled(true)
             .build()
         notificationManager.createNotificationChannel(announcementChannel)
+
+        val externalMemoryChannel = NotificationChannelCompat
+            .Builder(EXTERNAL_MEMORY_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_DEFAULT)
+            .setName("进阶记忆同步")
+            .setVibrationEnabled(true)
+            .build()
+        notificationManager.createNotificationChannel(externalMemoryChannel)
     }
 
     override fun onTerminate() {

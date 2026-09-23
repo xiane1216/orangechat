@@ -823,23 +823,39 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                             it.enabled && it.id in assistant.externalMemoryIds && it.autoSaveMessages
                         }
                         if (externalMemoryConfigs.isNotEmpty() && replyText.isNotBlank()) {
+                            // 使用消息自身的创建时间作为远端 created_at，失败时入队自动重试
+                            val proactiveCreatedAt = formatSupabaseTimestamp(aiMessage.createdAt)
                             kotlinx.coroutines.coroutineScope {
                                 externalMemoryConfigs.forEach { config ->
                                     launch {
-                                        runCatching {
+                                        val result = runCatching {
                                             val service = ExternalMemoryService(config)
                                             service.saveMessage(
                                                 assistantId = assistant.id.toString(),
                                                 conversationId = conversationId.toString(),
                                                 role = "assistant",
                                                 content = replyText,
-                                            )
-                                        }.onFailure {
+                                                originalCreatedAt = proactiveCreatedAt,
+                                            ).getOrThrow()
+                                        }
+                                        if (result.isFailure) {
                                             Log.w(
                                                 ProactiveMessageService.TAG,
                                                 "Failed to save proactive message to external memory ${config.name}",
-                                                it
+                                                result.exceptionOrNull()
                                             )
+                                            runCatching {
+                                                ExternalMemoryRetryQueue.enqueue(
+                                                    config = config,
+                                                    assistantId = assistant.id.toString(),
+                                                    conversationId = conversationId.toString(),
+                                                    role = "assistant",
+                                                    content = replyText,
+                                                    originalCreatedAt = proactiveCreatedAt,
+                                                )
+                                            }.onFailure {
+                                                Log.w(ProactiveMessageService.TAG, "Failed to enqueue proactive message retry", it)
+                                            }
                                         }
                                     }
                                 }
