@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>橘瓣聊天界面提案 · 微信式布局演示</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface: #F7F7F8;
+  --surface-muted: #EFEFF2;
+  --text: #171717;
+  --text-muted: #52525B;
+  --border: rgba(23, 23, 23, 0.12);
+  --brand: #4B3FE3;
+  --brand-soft: #F2F7FF;
+  --brand-soft-strong: #E5EAFF;
+  --brand-text: #1A1759;
+  --brand-on: #FFFFFF;
+  --radius: 8px;
+  --radius-card: 12px;
+  --radius-full: 999px;
+  --spacer-4: 4px; --spacer-8: 8px; --spacer-12: 12px; --spacer-16: 16px; --spacer-20: 20px;
+  --font-sans: "SF Pro Text", "PingFang SC", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --weight-regular: 400; --weight-medium: 500; --weight-strong: 600;
+  --text-caption: 12px/18px;
+  --text-body: 14px/20px;
+  --text-title: 16px/24px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --surface: #171717;
+    --surface-muted: #262626;
+    --text: #E5E5E5;
+    --text-muted: #A1A1AA;
+    --border: rgba(229, 229, 229, 0.12);
+    --brand: #6054F1;
+    --brand-soft: #1A1759;
+    --brand-soft-strong: #3C2ECA;
+    --brand-text: #CFD8FF;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #171717;
+  --surface-muted: #262626;
+  --text: #E5E5E5;
+  --text-muted: #A1A1AA;
+  --border: rgba(229, 229, 229, 0.12);
+  --brand: #6054F1;
+  --brand-soft: #1A1759;
+  --brand-soft-strong: #3C2ECA;
+  --brand-text: #CFD8FF;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --surface: #F7F7F8;
+  --surface-muted: #EFEFF2;
+  --text: #171717;
+  --text-muted: #52525B;
+  --border: rgba(23, 23, 23, 0.12);
+  --brand: #4B3FE3;
+  --brand-soft: #F2F7FF;
+  --brand-soft-strong: #E5EAFF;
+  --brand-text: #1A1759;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: var(--spacer-20);
+  background: var(--surface);
+  color: var(--text);
+  font: var(--weight-regular) var(--text-body) var(--font-sans);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.page-title { font: var(--weight-medium) var(--text-title) var(--font-sans); text-align: center; }
+.page-hint { font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); text-align: center; margin: var(--spacer-4) 0 0; }
+.theme-toggle {
+  margin-top: var(--spacer-12);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius-full);
+  padding: var(--spacer-4) var(--spacer-12);
+  font: var(--weight-medium) var(--text-caption) var(--font-sans);
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--brand); border-color: var(--brand); }
+.phone {
+  width: 100%;
+  max-width: 340px;
+  margin: var(--spacer-16) auto 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  box-shadow: 0 0 0 var(--spacer-4) var(--surface-muted);
+}
+.statusbar { display: flex; justify-content: space-between; padding: var(--spacer-8) var(--spacer-16) 0; font: var(--weight-medium) var(--text-caption) var(--font-sans); color: var(--text-muted); }
+.appbar { display: flex; align-items: center; gap: var(--spacer-8); padding: var(--spacer-8) var(--spacer-16); border-bottom: 1px solid var(--border); }
+.appbar .back { color: var(--text-muted); font: var(--weight-regular) var(--text-title) var(--font-sans); }
+.appbar .name { font: var(--weight-medium) var(--text-title) var(--font-sans); }
+.chat { padding: var(--spacer-16); display: flex; flex-direction: column; gap: var(--spacer-12); }
+.time-chip { align-self: center; font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); background: var(--surface-muted); border-radius: var(--radius-full); padding: var(--spacer-4) var(--spacer-12); }
+.row { display: flex; gap: var(--spacer-8); align-items: flex-start; }
+.row.me { flex-direction: row-reverse; }
+.stack { display: flex; flex-direction: column; gap: var(--spacer-4); max-width: 78%; }
+.row.me .stack { align-items: flex-end; }
+.avatar { width: 36px; height: 36px; border-radius: var(--radius-full); display: flex; align-items: center; justify-content: center; font: var(--weight-strong) var(--text-caption) var(--font-sans); flex-shrink: 0; }
+.avatar.ai { background: var(--brand-soft-strong); color: var(--brand-text); }
+.avatar.me { background: var(--brand); color: var(--brand-on); }
+.bubble { border-radius: var(--radius); padding: var(--spacer-8) var(--spacer-12); border: 1px solid transparent; cursor: pointer; }
+.bubble.ai { background: var(--surface-muted); }
+.bubble.me { background: var(--brand); color: var(--brand-on); }
+.stack.selected .bubble { border-color: var(--brand); }
+.bubble .content { display: block; font: var(--weight-regular) var(--text-body) var(--font-sans); }
+.reasoning { display: flex; align-items: center; gap: var(--spacer-4); width: 100%; background: var(--brand-soft); color: var(--brand-text); border: none; border-radius: var(--radius); padding: var(--spacer-4) var(--spacer-8); margin-bottom: var(--spacer-4); font: var(--weight-medium) var(--text-caption) var(--font-sans); cursor: pointer; }
+.reasoning .r-arrow { margin-left: auto; display: inline-block; }
+.bubble.reasoning-open .r-arrow { transform: rotate(90deg); }
+.r-body { max-height: 0; overflow: hidden; }
+.bubble.reasoning-open .r-body { max-height: 260px; }
+.r-text { display: block; font: italic var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); padding: var(--spacer-8); }
+.toolbar { display: flex; gap: var(--spacer-8); max-height: 0; overflow: hidden; }
+.stack.selected .toolbar { max-height: 48px; padding-top: var(--spacer-4); }
+.t-btn { background: var(--surface-muted); border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius-full); padding: var(--spacer-4) var(--spacer-12); font: var(--weight-medium) var(--text-caption) var(--font-sans); cursor: pointer; }
+.t-btn:hover { color: var(--brand); border-color: var(--brand); }
+.inputbar { display: flex; gap: var(--spacer-8); padding: var(--spacer-12) var(--spacer-16); border-top: 1px solid var(--border); align-items: center; }
+.input { flex: 1; background: var(--surface-muted); border-radius: var(--radius-full); padding: var(--spacer-8) var(--spacer-16); font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); }
+.send { width: 32px; height: 32px; border-radius: var(--radius-full); background: var(--brand); color: var(--brand-on); display: flex; align-items: center; justify-content: center; font: var(--weight-strong) var(--text-body) var(--font-sans); flex-shrink: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .r-body, .toolbar { transition: max-height 150ms ease; }
+  .r-arrow { transition: transform 150ms ease; }
+}
+</style>
+</head>
+<body>
+<div class="page-title">聊天界面提案 · 微信式头像布局</div>
+<p class="page-hint">单击气泡 → 浮现操作栏　·　单击"已深度思考" → 展开思考链</p>
+<button class="theme-toggle" id="themeBtn" type="button">切换浅色 / 深色</button>
+
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span>5G ▮▮▮</span></div>
+  <div class="appbar"><span class="back">‹</span><span class="name">橘瓣助手</span></div>
+  <div class="chat">
+    <div class="time-chip">14:32</div>
+    <div class="row">
+      <div class="avatar ai">橘</div>
+      <div class="stack selected">
+        <div class="bubble ai" data-msg>
+          <button class="reasoning" data-action="toggle-reasoning" aria-expanded="false" type="button">
+            <span>已深度思考 3 秒</span><span class="r-arrow">▸</span>
+          </button>
+          <span class="r-body"><span class="r-text">用户在担心补传后时间戳会乱……需要确认三条写入路径：实时保存、失败重试、历史补传，全都传 message.createdAt 原始值，补传按时间升序插入，去重窗口前后各扩一天。给出验证方法让用户放心。</span></span>
+          <span class="content">放心，时间戳不会乱。实时、重试、补传三条路，写入的都是消息发出的原始时间，去 Supabase 表里看 created_at 就能验证～</span>
+        </div>
+        <div class="toolbar" role="toolbar">
+          <button class="t-btn" type="button">复制</button>
+          <button class="t-btn" type="button">重新生成</button>
+          <button class="t-btn" type="button">朗读</button>
+          <button class="t-btn" type="button">⋯</button>
+        </div>
+      </div>
+    </div>
+    <div class="row me">
+      <div class="avatar me">我</div>
+      <div class="stack">
+        <div class="bubble me" data-msg>
+          <span class="content">好耶！那我以后睡前一键补传 (❁´◡`❁)</span>
+        </div>
+        <div class="toolbar" role="toolbar">
+          <button class="t-btn" type="button">复制</button>
+          <button class="t-btn" type="button">编辑重发</button>
+          <button class="t-btn" type="button">⋯</button>
+        </div>
+      </div>
+    </div>
+    <div class="time-chip">14:41</div>
+    <div class="row me">
+      <div class="avatar me">我</div>
+      <div class="stack">
+        <div class="bubble me" data-msg>
+          <span class="content">对了，思考链放哪了？</span>
+        </div>
+        <div class="toolbar" role="toolbar">
+          <button class="t-btn" type="button">复制</button>
+          <button class="t-btn" type="button">编辑重发</button>
+          <button class="t-btn" type="button">⋯</button>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="avatar ai">橘</div>
+      <div class="stack">
+        <div class="bubble ai" data-msg>
+          <button class="reasoning" data-action="toggle-reasoning" aria-expanded="false" type="button">
+            <span>已深度思考 1 秒</span><span class="r-arrow">▸</span>
+          </button>
+          <span class="r-body"><span class="r-text">用户在问 UI 设计里的思考链位置……答案是折叠在气泡内部顶部，点一下就能展开，流式生成时自动展开、完成后收起。</span></span>
+          <span class="content">就在我这条气泡的顶部——点一下"已深度思考"就能展开看推理过程。</span>
+        </div>
+        <div class="toolbar" role="toolbar">
+          <button class="t-btn" type="button">复制</button>
+          <button class="t-btn" type="button">重新生成</button>
+          <button class="t-btn" type="button">朗读</button>
+          <button class="t-btn" type="button">⋯</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="inputbar">
+    <div class="input">输入消息…</div>
+    <div class="send">↑</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var root = document.body;
+
+  root.addEventListener('click', function(e){
+    var reasoningBtn = e.target.closest('[data-action="toggle-reasoning"]');
+    if (reasoningBtn) {
+      var bubble = reasoningBtn.closest('.bubble');
+      var open = bubble.classList.toggle('reasoning-open');
+      reasoningBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      return;
+    }
+    if (e.target.closest('.toolbar')) return;
+    var msg = e.target.closest('[data-msg]');
+    if (msg) {
+      var stack = msg.closest('.stack');
+      var was = stack.classList.contains('selected');
+      root.querySelectorAll('.stack.selected').forEach(function(s){ s.classList.remove('selected'); });
+      if (!was) stack.classList.add('selected');
+      return;
+    }
+    if (e.target.closest('.chat')) {
+      root.querySelectorAll('.stack.selected').forEach(function(s){ s.classList.remove('selected'); });
+    }
+  });
+
+  var themeBtn = document.getElementById('themeBtn');
+  var html = document.documentElement;
+  themeBtn.addEventListener('click', function(){
+    var cur = html.getAttribute('data-theme') ||
+      (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    html.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

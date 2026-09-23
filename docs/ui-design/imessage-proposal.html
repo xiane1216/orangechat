@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>橘瓣聊天界面提案 v2 · iMessage 风格</title>
+<style>
+:root {
+  color-scheme: light;
+  --page-bg: #F2F2F7;
+  --screen-bg: #FFFFFF;
+  --them-bubble: #E9E9EB;
+  --them-text: #000000;
+  --me-bubble: #4B3FE3;
+  --me-text: #FFFFFF;
+  --think: #8E8E93;
+  --think-active: #4B3FE3;
+  --input-bg: #FFFFFF;
+  --input-border: #C7C7CC;
+  --input-text: #8E8E93;
+  --plus: #8E8E93;
+  --name: #8E8E93;
+  --phone-border: rgba(0, 0, 0, 0.1);
+  --phone-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  --title: #1C1C1E;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page-bg: #000000;
+  --screen-bg: #000000;
+  --them-bubble: #26262A;
+  --them-text: #F2F2F7;
+  --me-bubble: #6054F1;
+  --me-text: #FFFFFF;
+  --think: #8E8E93;
+  --think-active: #8F9BFF;
+  --input-bg: #1C1C1E;
+  --input-border: #2C2C2E;
+  --input-text: #8E8E93;
+  --plus: #8E8E93;
+  --name: #8E8E93;
+  --phone-border: rgba(255, 255, 255, 0.15);
+  --phone-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  --title: #F2F2F7;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body {
+  margin: 0;
+  padding: 24px 16px;
+  background: var(--page-bg);
+  font-family: -apple-system, "SF Pro Text", "PingFang SC", system-ui, "Segoe UI", Roboto, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.page-title { font-size: 16px; font-weight: 600; color: var(--title); text-align: center; }
+.page-hint { font-size: 12px; color: var(--think); text-align: center; margin: 4px 0 0; line-height: 18px; }
+.theme-toggle {
+  margin-top: 12px;
+  background: transparent;
+  border: 1px solid var(--input-border);
+  color: var(--think);
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--me-bubble); border-color: var(--me-bubble); }
+
+.phone {
+  position: relative;
+  width: 100%;
+  max-width: 340px;
+  margin: 20px auto 0;
+  background: var(--screen-bg);
+  border: 1px solid var(--phone-border);
+  border-radius: 28px;
+  overflow: hidden;
+  box-shadow: var(--phone-shadow);
+}
+.statusbar {
+  display: flex; justify-content: space-between;
+  padding: 10px 20px 0;
+  font-size: 12px; font-weight: 600; color: var(--them-text);
+}
+.appbar {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 16px 10px;
+  border-bottom: 0.5px solid var(--input-border);
+}
+.appbar .mini-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--me-bubble); color: var(--me-text);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600;
+}
+.appbar .who { margin-top: 3px; font-size: 11px; color: var(--name); line-height: 13px; }
+
+.chat {
+  padding: 16px 12px;
+  display: flex; flex-direction: column;
+  gap: 14px;
+  min-height: 400px;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.group { display: flex; flex-direction: column; gap: 3px; }
+.group.me { align-items: flex-end; }
+.group.them { align-items: flex-start; }
+.bubble {
+  max-width: 82%;
+  padding: 8px 13px;
+  font-size: 14px; line-height: 20px;
+  border-radius: 17px;
+  cursor: pointer;
+}
+.group.them .bubble { background: var(--them-bubble); color: var(--them-text); border-bottom-left-radius: 17px; }
+.group.me .bubble { background: var(--me-bubble); color: var(--me-text); border-bottom-right-radius: 17px; }
+.group.them .bubble.first { border-bottom-left-radius: 5px; }
+.group.me .bubble.first { border-bottom-right-radius: 5px; }
+@media (prefers-reduced-motion: no-preference) {
+  .bubble { transition: transform 120ms ease, opacity 120ms ease; }
+  .bubble:active { transform: scale(0.97); opacity: 0.85; }
+}
+.r-body { max-height: 0; overflow: hidden; }
+.group.open .r-body { max-height: 200px; }
+.r-text {
+  display: block;
+  font-size: 11px; line-height: 16px; font-style: italic;
+  color: var(--think);
+  padding: 4px 10px 2px;
+  max-width: 280px;
+}
+.think {
+  display: flex; align-items: center; gap: 4px;
+  background: none; border: none; padding: 2px 8px;
+  font-size: 13px; color: var(--think);
+  cursor: pointer; font-family: inherit;
+}
+.think .t-arrow { font-size: 9px; transition: transform 150ms ease; }
+.group.open .think { color: var(--think-active); }
+.group.open .think .t-arrow { transform: rotate(90deg); }
+@media (prefers-reduced-motion: no-preference) {
+  .r-body { transition: max-height 180ms ease; }
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 172px;
+  background: rgba(40, 40, 42, 0.92);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border-radius: 12px;
+  padding: 4px 0;
+  z-index: 20;
+  display: none;
+  transform-origin: top left;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+.group.me .menu { left: auto; right: 0; transform-origin: top right; }
+.menu.show { display: block; }
+.menu::before {
+  content: "";
+  position: absolute;
+  top: -4px; left: 22px;
+  width: 10px; height: 10px;
+  background: rgba(40, 40, 42, 0.92);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+.group.me .menu::before { left: auto; right: 22px; }
+@media (prefers-reduced-motion: no-preference) {
+  .menu.show { animation: pop 130ms ease-out; }
+  @keyframes pop {
+    from { transform: scale(0.88); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+}
+.menu-item {
+  display: block;
+  width: 100%;
+  background: none; border: none;
+  padding: 9px 16px;
+  font-size: 13px; line-height: 18px;
+  color: #FFFFFF;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+.menu-item + .menu-item { border-top: 0.5px solid rgba(255, 255, 255, 0.15); }
+.menu-item:hover { background: rgba(255, 255, 255, 0.08); }
+
+.toast {
+  position: absolute;
+  top: 64px; left: 50%;
+  transform: translateX(-50%) translateY(-6px);
+  background: rgba(40, 40, 42, 0.92);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  color: #FFFFFF;
+  font-size: 12px; line-height: 18px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 30;
+  transition: opacity 150ms ease, transform 150ms ease;
+  white-space: nowrap;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.inputbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 18px;
+}
+.plus {
+  width: 30px; height: 30px; flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--plus);
+  font-size: 15px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-family: inherit;
+}
+.input {
+  flex: 1;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 20px;
+  padding: 7px 14px;
+  font-size: 13px;
+  color: var(--input-text);
+  line-height: 18px;
+}
+.send {
+  width: 30px; height: 30px; flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--me-bubble); color: var(--me-text);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700;
+  cursor: pointer;
+}
+</style>
+</head>
+<body>
+<div class="page-title">聊天界面提案 v2 · iMessage 风格</div>
+<p class="page-hint">长按气泡 → 弹出操作菜单　·　点 ✦ → 展开 / 收起思考链</p>
+<button class="theme-toggle" id="themeBtn" type="button">切换浅色 / 深色</button>
+
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span>5G ▮▮▮</span></div>
+  <div class="appbar">
+    <div class="mini-avatar">橘</div>
+    <div class="who">橘瓣助手</div>
+  </div>
+
+  <div class="chat">
+    <div class="group them" style="position: relative;">
+      <div class="bubble first" data-msg>放心，时间戳不会乱。实时、重试、补传三条路，写入的都是消息发出的原始时间。</div>
+      <div class="r-body"><span class="r-text">用户在担心补传后时间戳会乱……确认三条写入路径：实时保存、失败重试、历史补传，全都传 message.createdAt 原始值，按时间升序插入。给出 Supabase 验证方法让用户放心。</span></div>
+      <button class="think" data-think type="button" aria-expanded="false"><span>✦</span><span class="t-arrow">▸</span></button>
+    </div>
+
+    <div class="group me" style="position: relative;">
+      <div class="bubble first" data-msg>好耶！那我以后睡前一键补传 (❁´◡`❁)</div>
+      <div class="bubble" data-msg>这个界面好像 iMessage！干净好多</div>
+    </div>
+
+    <div class="group them" style="position: relative;">
+      <div class="bubble first" data-msg>对，无头像、无时间戳、零按钮——所有操作都收进长按菜单里，思考链缩成一个小 ✦。</div>
+      <div class="r-body"><span class="r-text">用户喜欢 iMessage 的极简精致……要点：无头像、无时间戳、小字号、长按弹深色磨砂菜单。思考链不能占视觉空间，折叠进 ✦ 小图标。</span></div>
+      <button class="think" data-think type="button" aria-expanded="false"><span>✦</span><span class="t-arrow">▸</span></button>
+    </div>
+
+    <div class="group me" style="position: relative;">
+      <div class="bubble first" data-msg>长按我一下试试！</div>
+    </div>
+  </div>
+
+  <div class="menu" id="menu"></div>
+  <div class="toast" id="toast">已拷贝</div>
+
+  <div class="inputbar">
+    <button class="plus" type="button">＋</button>
+    <div class="input">iMessage</div>
+    <div class="send">↑</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var menu = document.getElementById('menu');
+  var toast = document.getElementById('toast');
+  var menuOpen = false;
+  var toastTimer = null;
+  var pressTimer = null;
+
+  var MENU_THEM = [
+    { label: '拷贝', toast: '已拷贝' },
+    { label: '翻译', toast: '演示：翻译中…' },
+    { label: '朗读', toast: '演示：朗读中…' },
+    { label: '重新生成', toast: '演示：重新生成中…' },
+    { label: '删除…', toast: '演示：并没有真的删' }
+  ];
+  var MENU_ME = [
+    { label: '拷贝', toast: '已拷贝' },
+    { label: '编辑重发', toast: '演示：编辑中…' },
+    { label: '删除…', toast: '演示：并没有真的删' }
+  ];
+
+  function renderMenu(group) {
+    var items = group.classList.contains('me') ? MENU_ME : MENU_THEM;
+    menu.innerHTML = '';
+    items.forEach(function (it) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'menu-item';
+      b.textContent = it.label;
+      b.dataset.toast = it.toast;
+      menu.appendChild(b);
+    });
+    group.appendChild(menu);
+    menu.classList.add('show');
+    menuOpen = true;
+  }
+
+  function hideMenu() {
+    menu.classList.remove('show');
+    menuOpen = false;
+  }
+
+  function showToast(text) {
+    toast.textContent = text;
+    toast.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      toast.classList.remove('show');
+    }, 1400);
+  }
+
+  // 长按气泡 450ms 弹出菜单
+  document.addEventListener('pointerdown', function (e) {
+    var msg = e.target.closest('[data-msg]');
+    if (!msg) return;
+    var group = msg.closest('.group');
+    var target = msg;
+    pressTimer = setTimeout(function () {
+      pressTimer = null;
+      renderMenu(group);
+      if (navigator.vibrate) navigator.vibrate(10);
+    }, 450);
+    var cancel = function () {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      target = null;
+    };
+    e.target.addEventListener('pointerup', cancel, { once: true });
+    e.target.addEventListener('pointercancel', cancel, { once: true });
+    e.target.addEventListener('pointerleave', cancel, { once: true });
+  });
+
+  // 桌面右键同样弹出菜单
+  document.addEventListener('contextmenu', function (e) {
+    var msg = e.target.closest('[data-msg]');
+    if (msg) {
+      e.preventDefault();
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      renderMenu(msg.closest('.group'));
+    }
+  });
+
+  // 点击空白处关闭菜单
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('.menu')) return;
+    if (menuOpen) hideMenu();
+  });
+
+  // 菜单项点击 → toast 反馈
+  menu.addEventListener('click', function (e) {
+    var item = e.target.closest('.menu-item');
+    if (!item) return;
+    e.stopPropagation();
+    showToast(item.dataset.toast);
+    hideMenu();
+  });
+
+  // ✦ 展开思考链
+  document.querySelectorAll('[data-think]').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var group = btn.closest('.group');
+      var open = group.classList.toggle('open');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  });
+
+  // 主题切换（初始跟随系统）
+  var html = document.documentElement;
+  if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    html.setAttribute('data-theme', 'dark');
+  }
+  document.getElementById('themeBtn').addEventListener('click', function () {
+    var cur = html.getAttribute('data-theme') ||
+      (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    html.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

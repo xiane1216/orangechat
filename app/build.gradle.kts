@@ -51,6 +51,12 @@ android {
         localProperties.getProperty("keyAlias") != null &&
         localProperties.getProperty("keyPassword") != null
 
+    // 仓库内置 release 签名（release.keystore 已提交进 git）：
+    // 保证任何环境（包括新会话/新机器 clone 后）构建的 APK 签名一致，可直接覆盖安装。
+    // local.properties 中配置同名参数可覆盖此默认值。
+    val builtinKeystore = rootProject.file("release.keystore")
+    val hasBuiltinSigning = builtinKeystore.exists()
+
     // 构建溯源信息
     val gitCommit = try {
         providers.exec {
@@ -72,6 +78,12 @@ android {
                 storePassword = localProperties.getProperty("storePassword")
                 keyAlias = localProperties.getProperty("keyAlias")
                 keyPassword = localProperties.getProperty("keyPassword")
+            } else if (hasBuiltinSigning) {
+                // 仓库内置 release 签名 fallback（新环境 clone 后无需 local.properties 即可构建出同签名 APK）
+                storeFile = builtinKeystore
+                storePassword = "orangechat2026"
+                keyAlias = "rikkahub"
+                keyPassword = "orangechat2026"
             }
         }
         // 项目内置共享 debug keystore，保证所有机器/开发者构建的 debug 包签名一致，
@@ -102,9 +114,9 @@ android {
         }
         debug {
             applicationIdSuffix = ".debug"
-            // 统一使用项目内置共享 debug keystore；若配置了 release keystore 则改用 release 签名，
+            // 统一使用项目内置共享 debug keystore；若配置了 release keystore（或仓库内置签名可用）则改用 release 签名，
             // 保证不同机器签名一致，避免覆盖安装失败（Failure [-99]）。
-            signingConfig = signingConfigs.getByName(if (hasReleaseSigning) "release" else "debug")
+            signingConfig = signingConfigs.getByName(if (hasReleaseSigning || hasBuiltinSigning) "release" else "debug")
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
             buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
@@ -157,14 +169,14 @@ android {
         compilerOptions.optIn.add("androidx.navigation3.runtime.ExperimentalNavigation3Api")
     }
 
-    // Release 构建强制要求配置独立的 release keystore，禁止回退到 debug keystore。
+    // Release 构建强制要求 release keystore（local.properties 或仓库内置均可），禁止回退到 debug keystore。
     // 这是为了防止 release APK 使用公开已知的 debug 签名（密码 android）被伪造/篡改。
     tasks.configureEach {
         val taskName = name
         if (taskName.contains("Release", ignoreCase = true) &&
             (taskName.startsWith("assemble") || taskName.startsWith("bundle") || taskName.startsWith("package"))) {
             doFirst {
-                if (!hasReleaseSigning) {
+                if (!hasReleaseSigning && !hasBuiltinSigning) {
                     throw GradleException(
                         "Release build requires a release keystore. " +
                         "Please configure storeFile, storePassword, keyAlias and keyPassword in local.properties."

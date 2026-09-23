@@ -36,7 +36,9 @@ _projB_*.txt
 gen_*.py
 _gen.py
 
-# 签名密钥（绝不可提交）
+# 签名密钥（其余密钥绝不可提交）
 *.jks
 *.keystore
 keystore.properties
+# 仓库内置统一签名（用户要求所有构建签名一致以便覆盖安装，私有仓库专用，勿转公开）
+!release.keystore
