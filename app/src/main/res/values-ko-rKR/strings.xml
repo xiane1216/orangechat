@@ -65,6 +65,14 @@
   <string name="assistant_page_context_message_desc">과거 메시지 중 몇 개를 모델에 컨텍스트로 보낼지 제어. 이 수를 초과한 메시지는 무시되고 가장 최근 N개 메시지만 유지되어 토큰을 절약할 수 있습니다</string>
   <string name="assistant_page_context_message_size">컨텍스트 메시지 수</string>
   <string name="assistant_page_context_message_unlimited">무제한 컨텍스트 메시지</string>
+  <string name="assistant_page_reasoning_retention_size">추론 체인 전송 설정</string>
+  <string name="assistant_page_reasoning_retention_desc">AI 추론 체인을 모델에 다시 전송하는 방식을 제어합니다: 무제한=모두 전송, 최근 N라운드 유지=최근 추론만 유지(창 잘라내기는 접두사 캐시 적중률을 떨어뜨립니다), 전송 안 함=모든 추론 제거로 입력 토큰이 가장 절약되고 캐시도 최적</string>
+  <string name="assistant_page_reasoning_retention_count">최근 %d 라운드의 추론 체인 유지</string>
+  <string name="assistant_page_reasoning_retention_unlimited">모든 추론 체인 유지 (무제한)</string>
+  <string name="assistant_page_reasoning_retention_unlimited_short">무제한</string>
+  <string name="assistant_page_reasoning_retention_keep_rounds">최근 N라운드 유지</string>
+  <string name="assistant_page_reasoning_retention_drop_all">전송 안 함</string>
+  <string name="assistant_page_reasoning_retention_drop_all_desc">추론 체인은 전송되지 않고 메시지 본문만 전송됩니다. 입력 토큰이 가장 절약되며 캐시는 무제한 모드와 동일하게 최적</string>
   <string name="assistant_page_creative">창의적</string>
   <string name="assistant_page_current_assistant">현재 어시스턴트</string>
   <string name="assistant_page_custom_bodies">사용자 정의 본문</string>

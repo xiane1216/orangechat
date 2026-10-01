@@ -332,6 +332,51 @@ fun List<UIMessage>.limitContext(size: Int): List<UIMessage> {
     return this.subList(adjustedStartIndex, this.size)
 }
 
+/**
+ * 限制历史消息中保留的思考链轮数.
+ *
+ * 从最新消息往前数, 只保留最近 [rounds] 轮对话中 ASSISTANT 消息的思考链 (Reasoning),
+ * 更早的 ASSISTANT 消息在发送时会移除思考链以节省输入 token, 文本/工具等内容不受影响.
+ * "一轮" 以 USER 消息为边界计数.
+ *
+ * 负数表示"完全不回传"模式: 所有 ASSISTANT 消息的思考链全部移除.
+ * 该模式下历史消息形态在每次请求中保持稳定, 对前缀缓存友好.
+ *
+ * @param rounds 保留的轮数: 负数 = 完全不回传, 0 = 不限制 (保留全部), 正数 = 保留最近 N 轮
+ */
+fun List<UIMessage>.limitReasoningRetention(rounds: Int): List<UIMessage> {
+    if (rounds == 0) return this
+    if (none { it.role == MessageRole.ASSISTANT && it.parts.any { part -> part is UIMessagePart.Reasoning } }) return this
+
+    val result = mutableListOf<UIMessage>()
+    // 从后往前遍历, 记录已经过多少条 USER 消息
+    var userMsgCount = 0
+    for (message in this.asReversed()) {
+        when (message.role) {
+            MessageRole.USER -> {
+                userMsgCount++
+                result.add(message)
+            }
+            MessageRole.ASSISTANT -> {
+                // 负数 = 全部移除; 正数 = 该消息属于倒数第 (userMsgCount + 1) 轮, 超出窗口则移除
+                val shouldStrip = rounds < 0 || userMsgCount + 1 > rounds
+                if (shouldStrip) {
+                    val filtered = message.parts.filterNot { it is UIMessagePart.Reasoning }
+                    // 思考链被移除后如果消息变得完全为空 (无文本/工具等任何内容), 丢弃该消息避免部分 API 400
+                    if (filtered.isEmptyUIMessage() && message.parts.isNotEmpty()) {
+                        continue
+                    }
+                    result.add(message.copy(parts = filtered))
+                } else {
+                    result.add(message)
+                }
+            }
+            else -> result.add(message)
+        }
+    }
+    return result.reversed()
+}
+
 @Serializable
 sealed class ToolApprovalState {
     @Serializable

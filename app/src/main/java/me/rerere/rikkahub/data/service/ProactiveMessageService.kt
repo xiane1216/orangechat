@@ -40,6 +40,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.canResumeToolExecution
 import me.rerere.ai.ui.handleMessageChunk
+import me.rerere.ai.ui.limitReasoningRetention
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
@@ -642,9 +643,10 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                 // 获取历史消息（先过滤掉悬空的工具调用消息，避免 tool_use 结构不完整触发 400）
                 val historyMessages = filterInvalidToolMessages(
                     conversation?.currentMessages?.let {
-                        if (assistant.contextMessageSize > 0) {
+                        (if (assistant.contextMessageSize > 0) {
                             it.takeLast(assistant.contextMessageSize)
-                        } else it
+                        } else it)
+                            .limitReasoningRetention(assistant.reasoningRetentionRounds)
                     } ?: emptyList()
                 )
 

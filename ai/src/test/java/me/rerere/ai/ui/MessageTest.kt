@@ -127,6 +127,141 @@ class MessageTest {
         assertEquals(messages, result)
     }
 
+    // ==================== limitReasoningRetention Tests ====================
+
+    private fun createReasoningMessages(rounds: Int): List<UIMessage> = buildList {
+        for (i in 1..rounds) {
+            add(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("Question $i"))))
+            add(
+                UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(
+                        UIMessagePart.Reasoning(reasoning = "thinking $i"),
+                        UIMessagePart.Text("Answer $i")
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
+    fun `limitReasoningRetention with 0 rounds should return original list`() {
+        val messages = createReasoningMessages(3)
+        assertEquals(messages, messages.limitReasoningRetention(0))
+    }
+
+    @Test
+    fun `limitReasoningRetention should keep recent rounds and strip old reasoning`() {
+        val messages = createReasoningMessages(4) // 8 条消息, 4 轮
+        val result = messages.limitReasoningRetention(2)
+
+        // 消息数量不变
+        assertEquals(messages.size, result.size)
+
+        // 最近 2 轮的思考链保留
+        val recentAssistant1 = result[5]
+        val recentAssistant2 = result[7]
+        assertTrue(recentAssistant1.parts.any { it is UIMessagePart.Reasoning })
+        assertTrue(recentAssistant2.parts.any { it is UIMessagePart.Reasoning })
+
+        // 更早的轮次思考链被移除, 但文本保留
+        val oldAssistant1 = result[1]
+        val oldAssistant2 = result[3]
+        assertFalse(oldAssistant1.parts.any { it is UIMessagePart.Reasoning })
+        assertFalse(oldAssistant2.parts.any { it is UIMessagePart.Reasoning })
+        assertEquals("Answer 1", oldAssistant1.parts.filterIsInstance<UIMessagePart.Text>().first().text)
+        assertEquals("Answer 2", oldAssistant2.parts.filterIsInstance<UIMessagePart.Text>().first().text)
+    }
+
+    @Test
+    fun `limitReasoningRetention with rounds greater than total should keep all`() {
+        val messages = createReasoningMessages(3)
+        assertEquals(messages, messages.limitReasoningRetention(10))
+    }
+
+    @Test
+    fun `limitReasoningRetention should drop assistant message that becomes empty`() {
+        val messages = listOf(
+            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("Q1"))),
+            // 只有思考链的空回复 (生成中断场景)
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(UIMessagePart.Reasoning(reasoning = "interrupted"))
+            ),
+            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("Q2"))),
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Reasoning(reasoning = "thinking 2"),
+                    UIMessagePart.Text("Answer 2")
+                )
+            ),
+        )
+        val result = messages.limitReasoningRetention(1)
+
+        // 空消息被丢弃, 其余保留
+        assertEquals(3, result.size)
+        assertEquals("Q1", result[0].parts.filterIsInstance<UIMessagePart.Text>().first().text)
+        assertEquals("Q2", result[1].parts.filterIsInstance<UIMessagePart.Text>().first().text)
+        assertTrue(result[2].parts.any { it is UIMessagePart.Reasoning })
+    }
+
+    @Test
+    fun `limitReasoningRetention should not touch messages without reasoning`() {
+        val messages = listOf(
+            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("Q1"))),
+            UIMessage(role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text("A1"))),
+            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("Q2"))),
+            UIMessage(role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text("A2"))),
+        )
+        assertEquals(messages, messages.limitReasoningRetention(1))
+    }
+
+    // ==================== 完全不回传模式 (负数) Tests ====================
+
+    @Test
+    fun `limitReasoningRetention with negative rounds should strip all reasoning`() {
+        val messages = createReasoningMessages(3)
+        val result = messages.limitReasoningRetention(-1)
+
+        // 消息数量不变
+        assertEquals(messages.size, result.size)
+
+        // 所有 assistant 消息都没有思考链了, 但文本保留
+        val assistants = result.filter { it.role == MessageRole.ASSISTANT }
+        assertEquals(3, assistants.size)
+        assistants.forEach { assistant ->
+            assertFalse(assistant.parts.any { it is UIMessagePart.Reasoning })
+            assertTrue(assistant.parts.any { it is UIMessagePart.Text })
+        }
+    }
+
+    @Test
+    fun `limitReasoningRetention with negative rounds should drop reasoning-only messages`() {
+        val messages = listOf(
+            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("Q1"))),
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(UIMessagePart.Reasoning(reasoning = "interrupted thinking"))
+            ),
+            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("Q2"))),
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Reasoning(reasoning = "thinking"),
+                    UIMessagePart.Text("Answer")
+                )
+            ),
+        )
+        val result = messages.limitReasoningRetention(-1)
+
+        // 纯思考消息被丢弃, 其余保留且无思考链
+        assertEquals(3, result.size)
+        val lastAssistant = result.last()
+        assertTrue(lastAssistant.parts.none { it is UIMessagePart.Reasoning })
+        assertEquals("Answer", lastAssistant.parts.filterIsInstance<UIMessagePart.Text>().first().text)
+    }
+
     // ==================== isValidToUpload Tests ====================
 
     @Test

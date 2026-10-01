@@ -65,6 +65,14 @@
   <string name="assistant_page_context_message_desc">控制多少条历史消息会被作为上下文发送给模型, 超过此数量的消息会被忽略，只有最近的N条消息会被保留，可以节省token</string>
   <string name="assistant_page_context_message_size">上下文消息数量</string>
   <string name="assistant_page_context_message_unlimited">无限制的上下文消息</string>
+  <string name="assistant_page_reasoning_retention_size">思考链回传</string>
+  <string name="assistant_page_reasoning_retention_desc">控制 AI 思考链如何回传给模型: 无限制=全量回传; 保留近N轮=只回传最近N轮思考 (注意: 窗口截断会降低前缀缓存命中率); 不回传=移除全部思考链, 输入token最省且缓存命中最优</string>
+  <string name="assistant_page_reasoning_retention_count">保留最近 %d 轮的思考链</string>
+  <string name="assistant_page_reasoning_retention_unlimited">保留全部思考链 (无限制)</string>
+  <string name="assistant_page_reasoning_retention_unlimited_short">无限制</string>
+  <string name="assistant_page_reasoning_retention_keep_rounds">保留近N轮</string>
+  <string name="assistant_page_reasoning_retention_drop_all">不回传</string>
+  <string name="assistant_page_reasoning_retention_drop_all_desc">思考链完全不回传, 历史消息只保留正文。输入token最省, 缓存命中与无限制模式同样最优</string>
   <string name="assistant_page_creative">创造</string>
   <string name="assistant_page_current_assistant">当前助手</string>
   <string name="assistant_page_custom_bodies">自定义 Body</string>

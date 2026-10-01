@@ -65,6 +65,14 @@
   <string name="assistant_page_context_message_desc">モデルに送信される履歴メッセージの数を制御します。この数を超えるメッセージは無視され、最新のN個のメッセージのみが保持されます。これによりトークンを節約できます</string>
   <string name="assistant_page_context_message_size">コンテキストメッセージサイズ</string>
   <string name="assistant_page_context_message_unlimited">無制限のコンテキストメッセージ</string>
+  <string name="assistant_page_reasoning_retention_size">思考チェーン送信設定</string>
+  <string name="assistant_page_reasoning_retention_desc">AIの思考チェーンをモデルに送り返す方法を制御します: 無制限=すべて送信、直近Nラウンド保持=最近の思考のみ保持(ウィンドウ切断はプレフィックスキャッシュ命中率を下げます)、送信しない=すべての思考を除去して入力トークンが最も節約されキャッシュも最適</string>
+  <string name="assistant_page_reasoning_retention_count">直近 %d ラウンドの思考チェーンを保持</string>
+  <string name="assistant_page_reasoning_retention_unlimited">すべての思考チェーンを保持 (無制限)</string>
+  <string name="assistant_page_reasoning_retention_unlimited_short">無制限</string>
+  <string name="assistant_page_reasoning_retention_keep_rounds">直近Nラウンド保持</string>
+  <string name="assistant_page_reasoning_retention_drop_all">送信しない</string>
+  <string name="assistant_page_reasoning_retention_drop_all_desc">思考チェーンは送信されず、メッセージ本文のみ。入力トークンが最も節約され、キャッシュは無制限モードと同じく最適</string>
   <string name="assistant_page_creative">創造的</string>
   <string name="assistant_page_current_assistant">現在のアシスタント</string>
   <string name="assistant_page_custom_bodies">カスタムボディ</string>

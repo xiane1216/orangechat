@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -218,10 +219,12 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
         onExpandedChange = { state.onExpandedChange(it, loading) },
         icon = {
+            // ♡ 字形贴着字体基线渲染, 视觉上偏高; 轻微下移使其在图标框内上下居中
             Text(
                 text = "♡",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.offset(y = 1.5.dp),
             )
         },
         label = {

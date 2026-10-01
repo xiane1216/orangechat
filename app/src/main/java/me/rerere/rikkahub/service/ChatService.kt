@@ -59,6 +59,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.canResumeToolExecution
 import me.rerere.ai.ui.finishPendingTools
 import me.rerere.ai.ui.finishReasoning
+import me.rerere.ai.ui.limitReasoningRetention
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
@@ -634,7 +635,8 @@ class ChatService(
                 val providerHandler = providerManager.getProviderByType(provider)
 
                 val historyMessages = currentConversation.currentMessages.let {
-                    if (assistant.contextMessageSize > 0) it.takeLast(assistant.contextMessageSize) else it
+                    (if (assistant.contextMessageSize > 0) it.takeLast(assistant.contextMessageSize) else it)
+                        .limitReasoningRetention(assistant.reasoningRetentionRounds)
                 }
 
                 // 记录生成开始前的消息节点数量，作为"生成期间是否有新消息插入"的判断基准

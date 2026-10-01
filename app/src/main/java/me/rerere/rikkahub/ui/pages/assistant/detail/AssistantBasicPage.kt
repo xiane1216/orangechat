@@ -8,6 +8,7 @@ package me.rerere.rikkahub.ui.pages.assistant.detail
  
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -18,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
@@ -446,6 +448,73 @@ internal fun AssistantBasicContent(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f),
                 )
+            }
+            HorizontalDivider()
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_reasoning_retention_size))
+                },
+                description = {
+                    Text(
+                        text = stringResource(R.string.assistant_page_reasoning_retention_desc),
+                    )
+                }
+            ) {
+                // 三档模式: 0=无限制, >0=保留近N轮, 负数=完全不回传
+                val retention = assistant.reasoningRetentionRounds
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = retention == 0,
+                        onClick = { onUpdate(assistant.copy(reasoningRetentionRounds = 0)) },
+                        label = { Text(stringResource(R.string.assistant_page_reasoning_retention_unlimited_short)) }
+                    )
+                    FilterChip(
+                        selected = retention > 0,
+                        onClick = { onUpdate(assistant.copy(reasoningRetentionRounds = 50)) },
+                        label = { Text(stringResource(R.string.assistant_page_reasoning_retention_keep_rounds)) }
+                    )
+                    FilterChip(
+                        selected = retention < 0,
+                        onClick = { onUpdate(assistant.copy(reasoningRetentionRounds = -1)) },
+                        label = { Text(stringResource(R.string.assistant_page_reasoning_retention_drop_all)) }
+                    )
+                }
+
+                if (retention > 0) {
+                    Slider(
+                        value = retention.toFloat(),
+                        onValueChange = {
+                            onUpdate(
+                                assistant.copy(
+                                    reasoningRetentionRounds = it.roundToInt().coerceAtLeast(1)
+                                )
+                            )
+                        },
+                        valueRange = 1f..500f,
+                        steps = 0,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Text(
+                        text = stringResource(
+                            R.string.assistant_page_reasoning_retention_count,
+                            retention
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f),
+                    )
+                } else {
+                    Text(
+                        text = if (retention == 0) stringResource(R.string.assistant_page_reasoning_retention_unlimited)
+                        else stringResource(R.string.assistant_page_reasoning_retention_drop_all_desc),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f),
+                    )
+                }
             }
             HorizontalDivider()
             FormItem(

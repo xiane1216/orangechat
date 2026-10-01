@@ -12,6 +12,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.util.KeyRoulette
@@ -39,10 +40,11 @@ class ChatCompletionsAPIMessageTest {
     private fun invokeBuildMessages(messages: List<UIMessage>): JsonArray {
         val method = ChatCompletionsAPI::class.java.getDeclaredMethod(
             "buildMessages",
-            List::class.java
+            List::class.java,
+            Model::class.java
         )
         method.isAccessible = true
-        return method.invoke(api, messages) as JsonArray
+        return method.invoke(api, messages, Model(modelId = "test-model")) as JsonArray
     }
 
     @Test
@@ -169,8 +171,9 @@ class ChatCompletionsAPIMessageTest {
     }
 
     @Test
-    fun `reasoning should only be included for messages after last user message`() {
-        // First assistant message (before user's last message) - reasoning should NOT be included
+    fun `reasoning should be included for all assistant messages`() {
+        // 原橘瓣行为: 所有历史轮次的思考链全量回传 (includeReasoning = true)
+        // First assistant message - reasoning SHOULD be included (full retention)
         val assistant1 = UIMessage(
             role = MessageRole.ASSISTANT,
             parts = listOf(
@@ -179,7 +182,7 @@ class ChatCompletionsAPIMessageTest {
             )
         )
 
-        // Second assistant message (after user's last message) - reasoning SHOULD be included
+        // Second assistant message - reasoning SHOULD be included
         val assistant2 = UIMessage(
             role = MessageRole.ASSISTANT,
             parts = listOf(
@@ -204,11 +207,11 @@ class ChatCompletionsAPIMessageTest {
 
         assertEquals(2, assistantMessages.size)
 
-        // First assistant should NOT have reasoning_content
+        // First assistant SHOULD have reasoning_content (upstream retains all rounds)
         val first = assistantMessages[0].jsonObject
-        assertTrue("First assistant should not have reasoning_content",
-            !first.containsKey("reasoning_content") ||
-            first["reasoning_content"]?.jsonPrimitive?.content.isNullOrEmpty()
+        assertTrue("First assistant should have reasoning_content",
+            first.containsKey("reasoning_content") &&
+            first["reasoning_content"]?.jsonPrimitive?.content?.isNotEmpty() == true
         )
 
         // Second assistant SHOULD have reasoning_content
@@ -308,7 +311,8 @@ class ChatCompletionsAPIMessageTest {
     }
 
     @Test
-    fun `assistant with only reasoning and empty text should be filtered out`() {
+    fun `assistant with only reasoning and empty text should be kept with reasoning`() {
+        // 原橘瓣行为: 思考链全量回传, "思考+空正文"的消息因有 reasoning 不会被过滤
         val messages = listOf(
             UIMessage.user("Question 1"),
             UIMessage(
@@ -323,11 +327,13 @@ class ChatCompletionsAPIMessageTest {
 
         val result = invokeBuildMessages(messages)
 
-        assertEquals(2, result.size)
+        assertEquals(3, result.size)
         assertEquals("user", result[0].jsonObject["role"]?.jsonPrimitive?.content)
         assertEquals("Question 1", result[0].jsonObject["content"]?.jsonPrimitive?.content)
-        assertEquals("user", result[1].jsonObject["role"]?.jsonPrimitive?.content)
-        assertEquals("Question 2", result[1].jsonObject["content"]?.jsonPrimitive?.content)
+        assertEquals("assistant", result[1].jsonObject["role"]?.jsonPrimitive?.content)
+        assertEquals("thinking", result[1].jsonObject["reasoning_content"]?.jsonPrimitive?.content)
+        assertEquals("user", result[2].jsonObject["role"]?.jsonPrimitive?.content)
+        assertEquals("Question 2", result[2].jsonObject["content"]?.jsonPrimitive?.content)
     }
 
     @Test
