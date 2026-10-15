@@ -66,14 +66,27 @@ class SupabaseSyncService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                } else {
+                    alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                }
+            } catch (e: SecurityException) {
+                // Android 14+ 未授予精确闹钟权限时 setExact* 会抛 SecurityException 并导致 App 崩溃,
+                // 降级为不需要该权限的 windowed 闹钟, 保证 scheduleNext 不再向上抛异常
+                // (否则 finally 中的 markSyncing(false) 不会执行, "同步中"标记会永久卡死)
+                Log.w(TAG, "Exact alarm not permitted, falling back to windowed alarm", e)
+                alarmManager.setWindow(
                     AlarmManager.RTC_WAKEUP,
                     triggerTime,
+                    INTERVAL_MS / 2,
                     pendingIntent
                 )
-            } else {
-                alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
             }
 
             Log.d(TAG, "Scheduled Supabase sync at ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(triggerTime))}")

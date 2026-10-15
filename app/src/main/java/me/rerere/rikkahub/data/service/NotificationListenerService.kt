@@ -16,7 +16,6 @@ import android.service.notification.StatusBarNotification
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.util.concurrent.TimeUnit
 
 /**
  * 通知监听服务
@@ -38,8 +37,14 @@ class RikkaNotificationListenerService : NotificationListenerService() {
          * 获取今日通知
          */
         fun getTodayNotifications(): List<NotificationData> {
-            val now = System.currentTimeMillis()
-            val startOfDay = now - (now % TimeUnit.DAYS.toMillis(1))
+            // now - (now % 86400000) 算出的是 UTC 零点(比北京时间早8小时), 不是本地"今天",
+            // 改用 Calendar 计算本地时区的今日零点
+            val startOfDay = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
             return _notifications.value.filter { it.timestamp >= startOfDay }
         }
         

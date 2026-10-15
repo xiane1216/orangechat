@@ -47,8 +47,10 @@ data class SupabaseLocationData(
 data class SupabaseAppUsageData(
     val packageName: String,
     val appName: String,
-    val totalTimeInForeground: Long,
+    val totalTimeInForeground: Long, // 毫秒, 今日零点起的累计值(每行都是全天累计快照, 不是增量)
     val lastTimeUsed: Long,
+    // 换算好的分钟数, 防止 AI 把毫秒当分钟误读; 原毫秒字段保留兼容
+    val usageMinutes: Int = (totalTimeInForeground / 60000).toInt(),
 )
 
 @Serializable

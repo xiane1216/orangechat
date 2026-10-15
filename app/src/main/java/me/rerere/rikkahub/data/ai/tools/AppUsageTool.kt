@@ -38,21 +38,24 @@ fun createAppUsageTool(context: Context): Tool = Tool(
     execute = { args ->
         val params = args.jsonObject
         val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        // 无"使用情况访问"权限时 queryUsageStats 返回空列表, 会被误报为"今天没玩手机"(success=true, count=0),
+        // 先显式检查权限, 无权限时返回明确的错误信息
+        if (!SystemTools.hasAppUsagePermission(context)) {
+            return@Tool listOf(UIMessagePart.Text(
+                buildJsonObject {
+                    put("success", false)
+                    put("error", "App usage permission not granted. Enable 'Usage access' for this app in system settings.")
+                }.toString()
+            ))
+        }
         try {
             val limit = params["limit"]?.jsonPrimitive?.intOrNull ?: 10
-            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
-            val cal = java.util.Calendar.getInstance()
-            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
-            cal.set(java.util.Calendar.MINUTE, 0)
-            cal.set(java.util.Calendar.SECOND, 0)
-            cal.set(java.util.Calendar.MILLISECOND, 0)
-
-            val stats = usm.queryUsageStats(
-                android.app.usage.UsageStatsManager.INTERVAL_DAILY,
-                cal.timeInMillis,
-                System.currentTimeMillis()
-            ).filter { it.totalTimeInForeground > 0 }
-                .sortedByDescending { it.totalTimeInForeground }
+            // 改用 AppUsageService 的事件配对口径(与系统"屏幕使用时间"一致).
+            // 之前直接读 queryUsageStats 统计桶总账, 会把前一天使用并进"今天"且含息屏幻影计时,
+            // 导致数字虚高(微信几百分钟问题的直接来源).
+            val stats = me.rerere.rikkahub.data.service.AppUsageService(context)
+                .getTodayUsageStats()
+                .getOrThrow()
                 .take(limit)
 
             if (stats.isEmpty()) {

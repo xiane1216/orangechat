@@ -287,7 +287,13 @@ class SystemTools(private val context: Context, private val settings: Settings) 
                     when (operation) {
                         "query_recent_messages" -> {
                             val count = (params["count"]?.jsonPrimitive?.intOrNull ?: 10).coerceIn(1, 50)
-                            val url = java.net.URL("$baseUrl/rest/v1/$table?select=*&order=created_at.desc&limit=$count")
+                            // device_data 表没有 created_at 列(硬编码排序会导致查询报错),
+                            // 该表按 timestamp 文本列(yyyy-MM-dd HH:mm:ss)排序, 字典序即时间序
+                            val orderColumn = if (
+                                table.equals("device_data", ignoreCase = true) ||
+                                table == settings.systemToolsSetting.supabaseTableName
+                            ) "timestamp" else "created_at"
+                            val url = java.net.URL("$baseUrl/rest/v1/$table?select=*&order=$orderColumn.desc&limit=$count")
                             val connection = (url.openConnection() as java.net.HttpURLConnection).apply {
                                 requestMethod = "GET"
                                 setRequestProperty("apikey", apiKey)
