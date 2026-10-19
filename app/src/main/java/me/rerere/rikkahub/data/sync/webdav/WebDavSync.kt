@@ -295,8 +295,11 @@ class WebDavSync(
                                 settingsStore.update(settings)
                                 Log.i(TAG, "restoreFromBackupFile: Settings restored successfully")
                             } catch (e: Exception) {
-                                Log.e(TAG, "restoreFromBackupFile: Failed to restore settings", e)
-                                throw Exception("Failed to restore settings: ${e.message}")
+                                // 设置恢复失败不再中断整个导入 (聊天记录优先):
+                                // 保留当前设置继续导入对话, 所属助手已不存在的"孤儿对话"
+                                // 稍后会重归属到当前助手, 保证导入后在抽屉可见,
+                                // 避免旧版本备份 settings 字段不兼容导致整体恢复失败.
+                                Log.e(TAG, "restoreFromBackupFile: Failed to restore settings, keep current, continue", e)
                             }
                         }
 
@@ -491,15 +494,23 @@ class WebDavSync(
             var failedCount = 0
             var detectedCount = 0
             var folderedCount = 0
+            var remappedCount = 0
             var firstError: String? = null
             val assistantCounts = mutableMapOf<String, Int>()
+
+            // 当前设置中已有的助手 ID + 兜底助手 (当前选中的助手):
+            // 备份对话所属助手不存在时重归属到当前助手, 否则导入成功
+            // 但抽屉按当前助手过滤会导致聊天记录"看不见".
+            val settingsNow = settingsStore.settingsFlow.value
+            val knownAssistantIds = settingsNow.assistants.map { a -> a.id.toString() }.toSet()
+            val fallbackAssistantId = settingsNow.assistantId.toString()
 
             convCursor.use {
                 while (it.moveToNext()) {
                     try {
                         detectedCount++
                         val id = it.getString(it.getColumnIndexOrThrow("id"))
-                        val assistantId = it.getString(it.getColumnIndexOrThrow("assistant_id"))
+                        val originalAssistantId = it.getString(it.getColumnIndexOrThrow("assistant_id"))
                         val title = it.getString(it.getColumnIndexOrThrow("title"))
                         val nodesJson = it.getString(it.getColumnIndexOrThrow("nodes"))
                         val createAt = it.getLong(it.getColumnIndexOrThrow("create_at"))
@@ -516,6 +527,15 @@ class WebDavSync(
                         val folderId = if (columns.contains("folder_id")) {
                             it.getString(it.getColumnIndexOrThrow("folder_id")) ?: ""
                         } else ""
+
+                        // 所属助手已不存在/已删除 (或 settings 恢复失败): 重归属到当前助手,
+                        // 否则对话虽然导入成功, 抽屉按助手过滤后永远不可见.
+                        val assistantId = if (originalAssistantId in knownAssistantIds) {
+                            originalAssistantId
+                        } else {
+                            remappedCount++
+                            fallbackAssistantId
+                        }
 
                         assistantCounts.merge(assistantId, 1, Int::plus)
                         if (folderId.isNotEmpty()) folderedCount++
@@ -578,6 +598,7 @@ class WebDavSync(
                 failed = failedCount,
                 firstError = firstError,
                 folderedCount = folderedCount,
+                remappedAssistant = remappedCount,
                 assistantDistribution = distribution,
                 currentAssistantName = runCatching {
                     settings.getCurrentAssistant().name.ifBlank { "未命名助手" }
