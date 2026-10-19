@@ -22,11 +22,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "me.rerere.orangechat"
+        applicationId = "com.rely.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 167
-        versionName = "2.2.8"
+        versionCode = 168
+        versionName = "2.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
