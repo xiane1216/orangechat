@@ -495,7 +495,8 @@ fun ChatInput(
                 .imePadding()
                 .navigationBarsPadding()
                 .padding(horizontal = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            // 定稿 UI: 加号面板展开时显示在输入条上方 (ReverseOrder 把后声明的 Expanded 排到前面)
+            verticalArrangement = Arrangement.ReverseOrder
         ) {
             // Input area with optional background image
             Surface(
@@ -543,13 +544,11 @@ fun ChatInput(
                             onSendMessage = { sendMessage() }
                         )
 
-                        // 定稿 UI: 输入栏只保留 加号/语音/发送, 模型/搜索/思考深度收纳进加号面板
+                        // 定稿 UI: 单行药丸输入条 [+] [输入框] [麦克风] [发送]
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
                         ) {
                             ActionIconButton(
                                 onClick = {
@@ -561,7 +560,11 @@ fun ChatInput(
                                 )
                             }
 
-                            Spacer(modifier = Modifier.weight(1f))
+                            TextInputRow(
+                                state = state,
+                                onSendMessage = { sendMessage() },
+                                modifier = Modifier.weight(1f),
+                            )
 
                             // Voice button: click to record, click again to stop and send
                             // 通话进行中禁用, 避免两路麦克风冲突
@@ -624,15 +627,16 @@ fun ChatInput(
                                             }
                                         )
                                 ) {
+                                    // 定稿: 就绪=深色圆钮(亮色模式)/浅色(暗色模式), 空内容=灰色 dim
                                     val containerColor = when {
                                         loading -> MaterialTheme.colorScheme.errorContainer
                                         state.isEmpty() -> MaterialTheme.colorScheme.surfaceContainerHigh
-                                        else -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.inverseSurface
                                     }
                                     val contentColor = when {
                                         loading -> MaterialTheme.colorScheme.onErrorContainer
-                                        state.isEmpty() -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                                        else -> MaterialTheme.colorScheme.onPrimary
+                                        state.isEmpty() -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        else -> MaterialTheme.colorScheme.inverseOnSurface
                                     }
                                     Surface(
                                         modifier = Modifier.fillMaxSize(),
@@ -652,7 +656,7 @@ fun ChatInput(
                                             imageVector = HugeIcons.ArrowUp02,
                                             contentDescription = stringResource(R.string.send),
                                             tint = contentColor,
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(14.dp)
                                         )
                                     }
                                 }
@@ -798,6 +802,7 @@ private fun ActionIconButton(
 private fun TextInputRow(
     state: ChatInputState,
     onSendMessage: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val displaySettings = LocalDisplaySettings.current
     val filesManager: FilesManager = koinInject()
@@ -808,7 +813,7 @@ private fun TextInputRow(
     }
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         if (state.isEditing()) {

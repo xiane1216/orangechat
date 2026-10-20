@@ -72,10 +72,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastAll
+import androidx.compose.ui.window.Popup
 import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
 import androidx.core.content.FileProvider
@@ -93,11 +95,16 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Copy01
+import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.MusicNote03
+import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.PlayCircle
 import me.rerere.hugeicons.stroke.PauseCircle
+import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Video01
+import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
@@ -172,6 +179,7 @@ fun ChatMessage(
         }
     )
     var showActionsSheet by remember { mutableStateOf(false) }
+    var showActionMenu by remember { mutableStateOf(false) }
     var showSelectCopySheet by remember { mutableStateOf(false) }
     val navController = LocalNavController.current
     val context = LocalContext.current
@@ -185,7 +193,7 @@ fun ChatMessage(
             .fillMaxWidth()
             .pointerInput(message.id) {
                 detectTapGestures(onLongPress = {
-                    showActionsSheet = true
+                    showActionMenu = true
                 })
             },
         horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
@@ -238,6 +246,60 @@ fun ChatMessage(
  
         ProvideTextStyle(textStyle) {
             ChatMessageNerdLine(message = message)
+        }
+    }
+    if (showActionMenu) {
+        Popup(
+            alignment = Alignment.Center,
+            onDismissRequest = { showActionMenu = false }
+        ) {
+            // 定稿 UI: 微信式深色浮层操作菜单 (横排 图标+小字)
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF1F1F23).copy(alpha = 0.96f),
+                shadowElevation = 8.dp,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    MessageMenuButton(HugeIcons.Copy01, stringResource(R.string.copy)) {
+                        showActionMenu = false
+                        context.copyMessageToClipboard(message)
+                    }
+                    MessageMenuButton(HugeIcons.Refresh03, stringResource(R.string.regenerate)) {
+                        showActionMenu = false
+                        onRegenerate()
+                    }
+                    if (message.role == MessageRole.ASSISTANT) {
+                        MessageMenuButton(
+                            if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
+                            stringResource(R.string.tts)
+                        ) {
+                            if (!isSpeaking) {
+                                val text = message.parts
+                                    .filterIsInstance<UIMessagePart.Text>()
+                                    .joinToString("\n\n") { it.text }
+                                    .trim()
+                                val textToSpeak = if (displaySettings.ttsOnlyReadQuoted) {
+                                    text.extractQuotedContentAsText() ?: text
+                                } else text
+                                tts.speak(textToSpeak)
+                            } else {
+                                tts.stop()
+                            }
+                        }
+                    }
+                    MessageMenuButton(HugeIcons.Delete01, stringResource(R.string.delete)) {
+                        showActionMenu = false
+                        onDelete()
+                    }
+                    MessageMenuButton(HugeIcons.MoreVertical, stringResource(R.string.more_options)) {
+                        showActionMenu = false
+                        showActionsSheet = true
+                    }
+                }
+            }
         }
     }
     if (showActionsSheet) {
@@ -319,6 +381,29 @@ private fun UserMessageTextColor(content: @Composable () -> Unit) {
         CompositionLocalProvider(LocalTextStyle provides merged, content = content)
     } else {
         content()
+    }
+}
+
+/**
+ * 长按浮层菜单按钮 (微信式: 深色底 横排 图标+小字)
+ */
+@Composable
+private fun MessageMenuButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 5.dp)
+    ) {
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(17.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(
+            label,
+            fontSize = 9.5.sp,
+            maxLines = 1,
+            color = Color.White.copy(alpha = 0.92f)
+        )
     }
 }
 
