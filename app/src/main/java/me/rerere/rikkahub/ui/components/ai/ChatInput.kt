@@ -612,11 +612,11 @@ fun ChatInput(
                 }
             }
 
-            // Input area with optional background image
+            // Input area with optional background image (定稿: 整体胶囊形)
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.largeIncreased)
+                    .clip(RoundedCornerShape(26.dp))
                     .then(
                         if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
                             state = hazeState,
@@ -624,7 +624,7 @@ fun ChatInput(
                         )
                         else Modifier
                     ),
-                shape = MaterialTheme.shapes.largeIncreased,
+                shape = RoundedCornerShape(26.dp),
                 tonalElevation = 0.dp,
                 // When background image is set, make surface transparent so image is visible
                 color = if (inputBgBitmap != null) Color.Transparent
@@ -646,17 +646,12 @@ fun ChatInput(
                         )
                     }
                     Column(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         if (state.messageContent.isNotEmpty()) {
                             MediaFileInputRow(state = state)
                         }
-
-                        TextInputRow(
-                            state = state,
-                            onSendMessage = { sendMessage() }
-                        )
 
                         // 定稿 UI: 单行药丸输入条 [+] [输入框] [麦克风] [发送]
                         Row(
@@ -889,7 +884,7 @@ private fun TextInputRow(
                 .onFocusChanged {
                     isFocused = it.isFocused
                 },
-            shape = MaterialTheme.shapes.largeIncreased,
+            shape = RoundedCornerShape(22.dp),
             placeholder = {
                 Text(
                     stringResource(R.string.chat_input_placeholder),

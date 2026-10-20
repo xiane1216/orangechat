@@ -519,43 +519,34 @@ private fun TopBar(
             }
         },
         title = {
-            // 定稿 UI 方案 B: 头像 + 名字, 副标题为实时时钟 (每分钟刷新), 模型名不再常驻
+            // 顶栏: 头像 + 对话标题 (窗口生成/手动设置, 可点击改名), 不放时间
             val assistant = settings.getCurrentAssistant()
-            var clockText by remember {
-                mutableStateOf(java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")))
-            }
-            LaunchedEffect(Unit) {
-                while (true) {
-                    kotlinx.coroutines.delay(60_000)
-                    clockText = java.time.LocalTime.now()
-                        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-                }
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxWidth()
+            val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
+            Surface(
+                onClick = {
+                    if (conversation.messageNodes.isNotEmpty()) {
+                        titleState.open(conversation.title)
+                    } else {
+                        toaster.show(editTitleWarning, type = ToastType.Warning)
+                    }
+                },
+                color = Color.Transparent,
             ) {
-                UIAvatar(
-                    name = assistant.name,
-                    modifier = Modifier.size(30.dp),
-                    value = assistant.avatar,
-                    loading = false,
-                )
-                Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    UIAvatar(
+                        name = assistant.name,
+                        modifier = Modifier.size(30.dp),
+                        value = assistant.avatar,
+                        loading = false,
+                    )
                     Text(
-                        text = assistant.name.ifBlank {
-                            stringResource(R.string.assistant_page_default_assistant)
-                        },
+                        text = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) },
                         maxLines = 1,
                         style = MaterialTheme.typography.bodyMedium,
                         overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = clockText,
-                        maxLines = 1,
-                        color = LocalContentColor.current.copy(0.65f),
-                        style = MaterialTheme.typography.labelSmall,
                     )
                 }
             }

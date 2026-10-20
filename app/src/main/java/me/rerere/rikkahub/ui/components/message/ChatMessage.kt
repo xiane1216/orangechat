@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
@@ -204,125 +205,50 @@ fun ChatMessage(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         if (!message.parts.isEmptyUIMessage()) {
-            // 定稿 UI: 消息行 = 头像在消息侧面 (AI 左/用户右) + 消息列(名字小标签+正文+时间)
-            val isUser = message.role == MessageRole.USER
-            val assistantAvatarVisible = !isUser && assistant?.useAssistantAvatar == true && displaySettings.showModelIcon
-            val modelIconVisible = !isUser && assistant?.useAssistantAvatar != true && model != null && displaySettings.showModelIcon
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             ) {
-                val messageContent: @Composable () -> Unit = {
-                    // 名字小标签 (消息列顶部)
-                    if (isUser) {
-                        Text(
-                            text = displaySettings.userNickname.ifEmpty { stringResource(R.string.user_default_name) },
-                            style = MaterialTheme.typography.labelLarge,
-                            maxLines = 1,
-                            color = LocalContentColor.current.copy(alpha = 0.85f),
-                            modifier = Modifier.padding(bottom = 2.dp),
-                        )
-                    } else if (displaySettings.showModelName) {
-                        Text(
-                            text = assistant?.name?.ifEmpty { stringResource(R.string.assistant_page_default_assistant) }
-                                ?: model?.displayName
-                                ?: stringResource(R.string.assistant_page_default_assistant),
-                            style = MaterialTheme.typography.labelLarge,
-                            maxLines = 1,
-                            color = LocalContentColor.current.copy(alpha = 0.85f),
-                            modifier = Modifier.padding(bottom = 2.dp),
-                        )
-                    }
-                    ProvideTextStyle(textStyle) {
-                        MessagePartsBlock(
-                            assistant = assistant,
-                            role = message.role,
-                            parts = message.parts,
-                            annotations = message.annotations,
-                            loading = loading,
-                            model = model,
-                            onToolApproval = onToolApproval,
-                            onToolAnswer = onToolAnswer,
-                            onUserMessageClick = if (isUser) onEdit else null,
-                        )
-
-                        message.translation?.let { translation ->
-                            CollapsibleTranslationText(
-                                content = translation,
-                                onClickCitation = {}
-                            )
-                        }
-                    }
-
-                    ProvideTextStyle(textStyle) {
-                        ChatMessageNerdLine(message = message)
-                    }
-                }
-                if (isUser) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.End,
-                    ) {
-                        messageContent()
-                    }
-                    // 用户头像 (右侧, 沿用 showUserAvatar 与头像框设置)
-                    if (displaySettings.showUserAvatar) {
-                        Box(contentAlignment = Alignment.Center) {
-                            UIAvatar(
-                                name = displaySettings.userNickname,
-                                modifier = Modifier.size(32.dp),
-                                value = settings.userAvatar,
-                                loading = false,
-                            )
-                            AvatarFrameOverlay(
-                                framePath = displaySettings.userAvatarFramePath,
-                                offsetX = displaySettings.userAvatarFrameOffsetX,
-                                offsetY = displaySettings.userAvatarFrameOffsetY,
-                                scale = displaySettings.userAvatarFrameScale,
-                                baseSize = 32f,
-                            )
-                        }
-                    }
-                } else {
-                    // AI 头像 (左侧): 优先助手头像, 其次模型图标, 沿用 showModelIcon 与头像框设置
-                    if (assistantAvatarVisible) {
-                        Box(contentAlignment = Alignment.Center) {
-                            UIAvatar(
-                                name = assistant?.name ?: "",
-                                modifier = Modifier.size(32.dp),
-                                value = assistant?.avatar ?: Avatar.Dummy,
-                                loading = loading,
-                            )
-                            AvatarFrameOverlay(
-                                framePath = displaySettings.aiAvatarFramePath,
-                                offsetX = displaySettings.aiAvatarFrameOffsetX,
-                                offsetY = displaySettings.aiAvatarFrameOffsetY,
-                                scale = displaySettings.aiAvatarFrameScale,
-                                baseSize = 32f,
-                            )
-                        }
-                    } else if (modelIconVisible) {
-                        Box(contentAlignment = Alignment.Center) {
-                            AutoAIIcon(
-                                name = model?.modelId ?: "",
-                                modifier = Modifier.size(32.dp),
-                                loading = loading
-                            )
-                            AvatarFrameOverlay(
-                                framePath = displaySettings.aiAvatarFramePath,
-                                offsetX = displaySettings.aiAvatarFrameOffsetX,
-                                offsetY = displaySettings.aiAvatarFrameOffsetY,
-                                scale = displaySettings.aiAvatarFrameScale,
-                                baseSize = 32f,
-                            )
-                        }
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        messageContent()
-                    }
-                }
+                ChatMessageAssistantAvatar(
+                    message = message,
+                    model = model,
+                    assistant = assistant,
+                    loading = loading,
+                    modifier = Modifier.weight(1f)
+                )
+                ChatMessageUserAvatar(
+                    message = message,
+                    avatar = settings.userAvatar,
+                    nickname = settings.userNickname,
+                    modifier = Modifier.weight(1f)
+                )
             }
+        }
+        ProvideTextStyle(textStyle) {
+            MessagePartsBlock(
+                assistant = assistant,
+                role = message.role,
+                parts = message.parts,
+                annotations = message.annotations,
+                loading = loading,
+                model = model,
+                onToolApproval = onToolApproval,
+                onToolAnswer = onToolAnswer,
+                onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
+            )
+
+            message.translation?.let { translation ->
+                CollapsibleTranslationText(
+                    content = translation,
+                    onClickCitation = {}
+                )
+            }
+        }
+
+        ProvideTextStyle(textStyle) {
+            ChatMessageNerdLine(message = message)
         }
     }
     if (showActionMenu) {
