@@ -13,7 +13,6 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -35,7 +34,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
@@ -44,7 +42,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,7 +59,6 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
@@ -73,12 +69,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastAll
-import androidx.compose.ui.window.Popup
 import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
 import androidx.core.content.FileProvider
@@ -96,36 +90,26 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Copy01
-import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.MusicNote03
-import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.PlayCircle
 import me.rerere.hugeicons.stroke.PauseCircle
-import me.rerere.hugeicons.stroke.Refresh03
-import me.rerere.hugeicons.stroke.StopCircle
 import me.rerere.hugeicons.stroke.Video01
-import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
-import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
 import me.rerere.rikkahub.ui.components.ui.Favicon
-import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.components.ui.toComposeColor
 import me.rerere.rikkahub.ui.context.LocalDisplaySettings
-import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import androidx.compose.ui.text.font.Font
@@ -133,8 +117,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Image
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.base64Encode
-import me.rerere.rikkahub.utils.copyMessageToClipboard
-import me.rerere.rikkahub.utils.extractQuotedContentAsText
 import me.rerere.rikkahub.utils.openUrl
 import coil3.compose.AsyncImage
 import me.rerere.rikkahub.utils.splitIntoBubbleSegments
@@ -184,23 +166,13 @@ fun ChatMessage(
         }
     )
     var showActionsSheet by remember { mutableStateOf(false) }
-    var showActionMenu by remember { mutableStateOf(false) }
     var showSelectCopySheet by remember { mutableStateOf(false) }
     val navController = LocalNavController.current
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
-    val tts = LocalTTSState.current
-    val isSpeaking by tts.isSpeaking.collectAsState()
-    val displaySettings = LocalDisplaySettings.current
     // 长按消息弹出操作面板 (微信式交互, 定稿 UI: 移除消息下方常驻图标行)
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .pointerInput(message.id) {
-                detectTapGestures(onLongPress = {
-                    showActionMenu = true
-                })
-            },
+        modifier = modifier.fillMaxWidth(),
         horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -247,62 +219,36 @@ fun ChatMessage(
             }
         }
 
+        val showActions = if (lastMessage) {
+            !loading
+        } else {
+            message.parts.isEmptyUIMessage().not()
+        }
+
+        AnimatedVisibility(
+            visible = showActions,
+            enter = slideInVertically { it / 2 } + fadeIn(),
+            exit = slideOutVertically { it / 2 } + fadeOut()
+        ) {
+            Column(
+                modifier = Modifier.animateContentSize()
+            ) {
+                ChatMessageActionButtons(
+                    message = message,
+                    onRegenerate = onRegenerate,
+                    node = node,
+                    onUpdate = onUpdate,
+                    onOpenActionSheet = {
+                        showActionsSheet = true
+                    },
+                    onTranslate = onTranslate,
+                    onClearTranslation = onClearTranslation
+                )
+            }
+        }
+
         ProvideTextStyle(textStyle) {
             ChatMessageNerdLine(message = message)
-        }
-    }
-    if (showActionMenu) {
-        Popup(
-            alignment = Alignment.Center,
-            onDismissRequest = { showActionMenu = false }
-        ) {
-            // 定稿 UI: 微信式深色浮层操作菜单 (横排 图标+小字)
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF1F1F23).copy(alpha = 0.96f),
-                shadowElevation = 8.dp,
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 9.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    MessageMenuButton(HugeIcons.Copy01, stringResource(R.string.copy)) {
-                        showActionMenu = false
-                        context.copyMessageToClipboard(message)
-                    }
-                    MessageMenuButton(HugeIcons.Refresh03, stringResource(R.string.regenerate)) {
-                        showActionMenu = false
-                        onRegenerate()
-                    }
-                    if (message.role == MessageRole.ASSISTANT) {
-                        MessageMenuButton(
-                            if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
-                            stringResource(R.string.tts)
-                        ) {
-                            if (!isSpeaking) {
-                                val text = message.parts
-                                    .filterIsInstance<UIMessagePart.Text>()
-                                    .joinToString("\n\n") { it.text }
-                                    .trim()
-                                val textToSpeak = if (displaySettings.ttsOnlyReadQuoted) {
-                                    text.extractQuotedContentAsText() ?: text
-                                } else text
-                                tts.speak(textToSpeak)
-                            } else {
-                                tts.stop()
-                            }
-                        }
-                    }
-                    MessageMenuButton(HugeIcons.Delete01, stringResource(R.string.delete)) {
-                        showActionMenu = false
-                        onDelete()
-                    }
-                    MessageMenuButton(HugeIcons.MoreVertical, stringResource(R.string.more_options)) {
-                        showActionMenu = false
-                        showActionsSheet = true
-                    }
-                }
-            }
         }
     }
     if (showActionsSheet) {
@@ -318,29 +264,6 @@ fun ChatMessage(
             },
             isFavorite = isFavorite,
             onToggleFavorite = onToggleFavorite,
-            onCopy = {
-                context.copyMessageToClipboard(message)
-            },
-            onRegenerate = onRegenerate,
-            onSpeak = if (message.role == MessageRole.ASSISTANT) { {
-                if (!isSpeaking) {
-                    val text = message.parts
-                        .filterIsInstance<UIMessagePart.Text>()
-                        .joinToString("\n\n") { it.text }
-                        .trim()
-                    val textToSpeak = if (displaySettings.ttsOnlyReadQuoted) {
-                        text.extractQuotedContentAsText() ?: text
-                    } else {
-                        text
-                    }
-                    tts.speak(textToSpeak)
-                } else {
-                    tts.stop()
-                }
-            } } else null,
-            isSpeaking = isSpeaking,
-            onTranslate = onTranslate,
-            onClearTranslation = onClearTranslation,
             onWebViewPreview = {
                 val textContent = message.parts
                     .filterIsInstance<UIMessagePart.Text>()
@@ -384,29 +307,6 @@ private fun UserMessageTextColor(content: @Composable () -> Unit) {
         CompositionLocalProvider(LocalTextStyle provides merged, content = content)
     } else {
         content()
-    }
-}
-
-/**
- * 长按浮层菜单按钮 (微信式: 深色底 横排 图标+小字)
- */
-@Composable
-private fun MessageMenuButton(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 9.dp, vertical = 5.dp)
-    ) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(17.dp))
-        Spacer(Modifier.height(4.dp))
-        Text(
-            label,
-            fontSize = 9.5.sp,
-            maxLines = 1,
-            color = Color.White.copy(alpha = 0.92f)
-        )
     }
 }
 

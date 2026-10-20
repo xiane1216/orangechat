@@ -104,11 +104,11 @@ fun <T> ChainOfThought(
     Card(
             modifier = modifier,
             colors = effectiveCardColors,
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(16.dp),
         ) {
             Column(
                 modifier = Modifier
-                    .padding(horizontal = 10.dp, vertical = 3.dp)
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
                     .animateContentSize(
                         animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
                     ),
@@ -342,7 +342,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                             Modifier
                         }
                     )
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -393,19 +393,19 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                     extra()
                 }
 
-                // 指示器：onClick 显示向右箭头，content 显示展开/折叠箭头 (定稿: 缩小)
+                // 指示器：onClick 显示向右箭头，content 显示展开/折叠箭头
                 if (onClick != null) {
                     Icon(
                         imageVector = HugeIcons.ArrowRight01,
                         contentDescription = null,
-                        modifier = Modifier.size(13.dp),
+                        modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else if (hasContent) {
                     Icon(
                         imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
                         contentDescription = null,
-                        modifier = Modifier.size(13.dp),
+                        modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }

@@ -52,23 +52,6 @@ fun ChatMessageNerdLine(
                 itemVerticalAlignment = Alignment.CenterVertically,
                 modifier = modifier.padding(horizontal = 4.dp),
             ) {
-                // 定稿 UI: 每条消息下方显示发送时间 (几点几分)
-                StatsItem(
-                    icon = {
-                        Icon(
-                            imageVector = HugeIcons.Clock02,
-                            contentDescription = "Time",
-                            tint = color,
-                            modifier = Modifier.size(12.dp)
-                        )
-                    },
-                    content = {
-                        Text(
-                            text = message.createdAt.toJavaLocalDateTime()
-                                .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-                        )
-                    }
-                )
                 val usage = message.usage
                 if (settings.showTokenUsage && usage != null) {
                     // Input tokens

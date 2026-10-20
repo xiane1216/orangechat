@@ -219,12 +219,11 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
         onExpandedChange = { state.onExpandedChange(it, loading) },
         icon = {
-            // ♡ 图标在图标框内垂直居中 (用户反馈偏下, 上移)
-            // 图标与折叠标题使用同一透明度 (0.5f), 整体弱化存在感但不消失
+            // ♡ 字形在图标框内垂直居中 (仅保留位置修正)
             Text(
                 text = "♡",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.offset(y = (-1).dp),
             )
         },
@@ -233,12 +232,12 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 ReasoningTitle(title = thinkingTitle!!)
             } else {
                 Text(
-                    // 英文折叠标题, 弱化思考链存在感 (定稿 UI); 字号缩小一档
-                    text = "Thought for %.1fs".format(
-                        state.duration.toDouble(DurationUnit.SECONDS)
+                    text = stringResource(
+                        R.string.deep_thinking_seconds,
+                        state.duration.toDouble(DurationUnit.SECONDS).toFloat()
                     ),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }
@@ -248,7 +247,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 Text(
                     text = state.duration.toString(DurationUnit.SECONDS, 1),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }

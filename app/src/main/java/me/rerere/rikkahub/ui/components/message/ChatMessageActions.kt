@@ -241,16 +241,8 @@ fun ChatMessageActionsSheet(
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
     onWebViewPreview: () -> Unit,
-    // 长按面板新增: 原消息下方图标行的操作收纳到这里 (定稿 UI)
-    onCopy: (() -> Unit)? = null,
-    onRegenerate: (() -> Unit)? = null,
-    onSpeak: (() -> Unit)? = null,
-    isSpeaking: Boolean = false,
-    onTranslate: ((UIMessage, Locale) -> Unit)? = null,
-    onClearTranslation: (UIMessage) -> Unit = {},
     onDismissRequest: () -> Unit
 ) {
-    var showTranslateDialog by remember { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -286,120 +278,6 @@ fun ChatMessageActionsSheet(
                         text = stringResource(R.string.select_and_copy),
                         style = MaterialTheme.typography.titleMedium,
                     )
-                }
-            }
-
-            // Copy (原图标行收纳)
-            if (onCopy != null) {
-                Card(
-                    onClick = {
-                        onDismissRequest()
-                        onCopy()
-                    },
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Copy01,
-                            contentDescription = null,
-                            modifier = Modifier.padding(4.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.copy),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                    }
-                }
-            }
-
-            // Regenerate (原图标行收纳)
-            if (onRegenerate != null) {
-                Card(
-                    onClick = {
-                        onDismissRequest()
-                        onRegenerate()
-                    },
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Refresh03,
-                            contentDescription = null,
-                            modifier = Modifier.padding(4.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.regenerate),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                    }
-                }
-            }
-
-            // TTS 朗读 (原图标行收纳, 仅 AI 消息)
-            if (onSpeak != null) {
-                Card(
-                    onClick = {
-                        onSpeak()
-                    },
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
-                            contentDescription = null,
-                            modifier = Modifier.padding(4.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.tts),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                    }
-                }
-            }
-
-            // 翻译 (原图标行收纳)
-            if (onTranslate != null) {
-                Card(
-                    onClick = {
-                        showTranslateDialog = true
-                    },
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Translate,
-                            contentDescription = null,
-                            modifier = Modifier.padding(4.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.translate),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                    }
                 }
             }
 
@@ -585,23 +463,5 @@ fun ChatMessageActionsSheet(
                 }
             }
         }
-    }
-
-    // Translation dialog (长按面板内)
-    if (showTranslateDialog && onTranslate != null) {
-        LanguageSelectionDialog(
-            onLanguageSelected = { language ->
-                showTranslateDialog = false
-                onDismissRequest()
-                onTranslate(message, language)
-            },
-            onClearTranslation = {
-                showTranslateDialog = false
-                onClearTranslation(message)
-            },
-            onDismissRequest = {
-                showTranslateDialog = false
-            },
-        )
     }
 }
