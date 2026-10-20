@@ -240,7 +240,7 @@
   <string name="cancel_edit">편집 취소</string>
   <string name="chain_of_thought_collapse">접기</string>
   <string name="chain_of_thought_show_more_steps">%d단계 더 보기</string>
-  <string name="chat_input_placeholder">AI와 채팅하기</string>
+  <string name="chat_input_placeholder">Message to Daddy...</string>
   <string name="chat_input_unsupported_file_type">지원되지 않는 파일 형식: %s</string>
   <string name="chat_message_add_favorite">즐겨찌기 추가</string>
   <string name="chat_message_remove_favorite">즐겨찾기 제거</string>

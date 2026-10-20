@@ -30,6 +30,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.currentWindowDpSize
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import me.rerere.hugeicons.stroke.MoreVertical
+import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -510,64 +519,80 @@ private fun TopBar(
             }
         },
         title = {
-            val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
-            Surface(
-                onClick = {
-                    if (conversation.messageNodes.isNotEmpty()) {
-                        titleState.open(conversation.title)
-                    } else {
-                        toaster.show(editTitleWarning, type = ToastType.Warning)
-                    }
-                },
-                color = Color.Transparent,
+            // 定稿 UI 方案 B: 头像 + 名字, 副标题为实时时钟 (每分钟刷新), 模型名不再常驻
+            val assistant = settings.getCurrentAssistant()
+            var clockText by remember {
+                mutableStateOf(java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")))
+            }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    kotlinx.coroutines.delay(60_000)
+                    clockText = java.time.LocalTime.now()
+                        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+                }
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                UIAvatar(
+                    name = assistant.name,
+                    modifier = Modifier.size(30.dp),
+                    value = assistant.avatar,
+                    loading = false,
+                )
                 Column {
-                    val assistant = settings.getCurrentAssistant()
-                    val model = settings.getCurrentChatModel()
-                    val provider = model?.findProvider(providers = settings.providers, checkOverwrite = false)
                     Text(
-                        text = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) },
+                        text = assistant.name.ifBlank {
+                            stringResource(R.string.assistant_page_default_assistant)
+                        },
                         maxLines = 1,
                         style = MaterialTheme.typography.bodyMedium,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (model != null && provider != null) {
-                        Text(
-                            text = "${assistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) }} / ${model.displayName} (${provider.name})",
-                            overflow = TextOverflow.Ellipsis,
-                            maxLines = 1,
-                            color = LocalContentColor.current.copy(0.65f),
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 8.sp,
-                            )
-                        )
-                    }
+                    Text(
+                        text = clockText,
+                        maxLines = 1,
+                        color = LocalContentColor.current.copy(0.65f),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
             }
         },
         actions = {
             IconButton(
                 onClick = {
-                    onVoiceCall()
-                }
-            ) {
-                Icon(HugeIcons.Voice, "Voice Call")
-            }
-
-            IconButton(
-                onClick = {
-                    onClickMenu()
-                }
-            ) {
-                Icon(if (previewMode) HugeIcons.Cancel01 else HugeIcons.LeftToRightListBullet, "Chat Options")
-            }
-
-            IconButton(
-                onClick = {
                     onNewChat()
                 }
             ) {
                 Icon(HugeIcons.MessageAdd01, "New Message")
+            }
+
+            // 语音通话/聊天选项 收纳进 ··· 菜单 (定稿 UI)
+            var topBarMenuExpanded by remember { mutableStateOf(false) }
+            androidx.compose.material3.IconButton(onClick = { topBarMenuExpanded = true }) {
+                Icon(HugeIcons.MoreVertical, "More")
+            }
+            DropdownMenu(
+                expanded = topBarMenuExpanded,
+                onDismissRequest = { topBarMenuExpanded = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.voice_call)) },
+                    leadingIcon = { Icon(HugeIcons.Voice, null) },
+                    onClick = {
+                        topBarMenuExpanded = false
+                        onVoiceCall()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.more_options)) },
+                    leadingIcon = { Icon(HugeIcons.LeftToRightListBullet, null) },
+                    onClick = {
+                        topBarMenuExpanded = false
+                        onClickMenu()
+                    }
+                )
             }
         },
     )

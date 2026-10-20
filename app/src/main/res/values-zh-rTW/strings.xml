@@ -232,7 +232,7 @@
   <string name="cancel_edit">取消編輯</string>
   <string name="chain_of_thought_collapse">收合</string>
   <string name="chain_of_thought_show_more_steps">顯示更多 %d 個步驟</string>
-  <string name="chat_input_placeholder">輸入訊息與AI聊天</string>
+  <string name="chat_input_placeholder">Message to Daddy...</string>
   <string name="chat_input_unsupported_file_type">不支援的檔案類型：%s</string>
   <string name="chat_message_add_favorite">加入最愛</string>
   <string name="chat_message_remove_favorite">移除最愛</string>
@@ -446,6 +446,7 @@
   <string name="model_list_search_placeholder">輸入模型名稱搜尋</string>
   <string name="model_list_select_model">選擇模型</string>
   <string name="more_options">更多選項</string>
+  <string name="voice_call">語音通話</string>
   <string name="no_text_content_to_copy">暫無可複製的文字內容</string>
   <string name="notification_channel_chat_completed">聊天完成</string>
   <string name="notification_channel_chat_live_update">聊天生成進度</string>

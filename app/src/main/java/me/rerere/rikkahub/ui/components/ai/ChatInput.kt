@@ -543,6 +543,7 @@ fun ChatInput(
                             onSendMessage = { sendMessage() }
                         )
 
+                        // 定稿 UI: 输入栏只保留 加号/语音/发送, 模型/搜索/思考深度收纳进加号面板
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -550,62 +551,6 @@ fun ChatInput(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                // Model Picker
-                                ModelSelector(
-                                    modelId = assistant.chatModelId ?: settings.chatModelId,
-                                    providers = settings.providers,
-                                    onSelect = {
-                                        onUpdateChatModel(it)
-                                        dismissExpand()
-                                    },
-                                    type = ModelType.CHAT,
-                                    onlyIcon = true,
-                                    modifier = Modifier,
-                                )
-
-                                // Search
-                                val enableSearchMsg = stringResource(R.string.web_search_enabled)
-                                val disableSearchMsg = stringResource(R.string.web_search_disabled)
-                                val chatModel = settings.getCurrentChatModel()
-                                SearchPickerButton(
-                                    enableSearch = enableSearch,
-                                    settings = settings,
-                                    onToggleSearch = { enabled ->
-                                        onToggleSearch(enabled)
-                                        toaster.show(
-                                            message = if (enabled) enableSearchMsg else disableSearchMsg,
-                                            duration = 1.seconds,
-                                            type = if (enabled) {
-                                                ToastType.Success
-                                            } else {
-                                                ToastType.Normal
-                                            }
-                                        )
-                                    },
-                                    onUpdateSearchService = onUpdateSearchService,
-                                    model = chatModel,
-                                )
-
-                                // Reasoning
-                                val model = settings.getCurrentChatModel()
-                                if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
-                                    ReasoningButton(
-                                        reasoningLevel = assistant.reasoningLevel,
-                                        onUpdateReasoningLevel = {
-                                            onUpdateAssistant(assistant.copy(reasoningLevel = it))
-                                        },
-                                        onlyIcon = true,
-                                    )
-                                }
-
-                            }
-
                             ActionIconButton(
                                 onClick = {
                                     expandToggle(ExpandState.Files)
@@ -615,6 +560,8 @@ fun ChatInput(
                                     contentDescription = stringResource(R.string.more_options)
                                 )
                             }
+
+                            Spacer(modifier = Modifier.weight(1f))
 
                             // Voice button: click to record, click again to stop and send
                             // 通话进行中禁用, 避免两路麦克风冲突
@@ -742,24 +689,84 @@ fun ChatInput(
                         tonalElevation = 0.dp,
                         color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
                     ) {
-                        FilesPicker(
-                            conversation = conversation,
-                            state = state,
-                            assistant = assistant,
-                            mcpManager = mcpManager,
-                            onCompressContext = onCompressContext,
-                            onUpdateAssistant = onUpdateAssistant,
-                            showInjectionSheet = showInjectionSheet,
-                            onShowInjectionSheetChange = { showInjectionSheet = it },
-                            showCompressDialog = showCompressDialog,
-                            onShowCompressDialogChange = { showCompressDialog = it },
-                            onDismiss = { dismissExpand() },
-                            onTakePic = onLaunchCamera,
-                            onPickImage = { imagePickerLauncher.launch("image/*") },
-                            onPickVideo = { videoPickerLauncher.launch("video/*") },
-                            onPickAudio = { audioPickerLauncher.launch("audio/*") },
-                            onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
-                        )
+                        Column {
+                            // 定稿 UI: 模型选择/联网搜索/思考深度 收纳进加号面板
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                // Model Picker
+                                ModelSelector(
+                                    modelId = assistant.chatModelId ?: settings.chatModelId,
+                                    providers = settings.providers,
+                                    onSelect = {
+                                        onUpdateChatModel(it)
+                                        dismissExpand()
+                                    },
+                                    type = ModelType.CHAT,
+                                    onlyIcon = true,
+                                    modifier = Modifier,
+                                )
+
+                                // Search
+                                val enableSearchMsg = stringResource(R.string.web_search_enabled)
+                                val disableSearchMsg = stringResource(R.string.web_search_disabled)
+                                val chatModel = settings.getCurrentChatModel()
+                                SearchPickerButton(
+                                    enableSearch = enableSearch,
+                                    settings = settings,
+                                    onToggleSearch = { enabled ->
+                                        onToggleSearch(enabled)
+                                        toaster.show(
+                                            message = if (enabled) enableSearchMsg else disableSearchMsg,
+                                            duration = 1.seconds,
+                                            type = if (enabled) {
+                                                ToastType.Success
+                                            } else {
+                                                ToastType.Normal
+                                            }
+                                        )
+                                    },
+                                    onUpdateSearchService = onUpdateSearchService,
+                                    model = chatModel,
+                                )
+
+                                // Reasoning
+                                val model = settings.getCurrentChatModel()
+                                if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
+                                    ReasoningButton(
+                                        reasoningLevel = assistant.reasoningLevel,
+                                        onUpdateReasoningLevel = {
+                                            onUpdateAssistant(assistant.copy(reasoningLevel = it))
+                                        },
+                                        onlyIcon = true,
+                                    )
+                                }
+                            }
+
+                            FilesPicker(
+                                conversation = conversation,
+                                state = state,
+                                assistant = assistant,
+                                mcpManager = mcpManager,
+                                onCompressContext = onCompressContext,
+                                onUpdateAssistant = onUpdateAssistant,
+                                showInjectionSheet = showInjectionSheet,
+                                onShowInjectionSheetChange = { showInjectionSheet = it },
+                                showCompressDialog = showCompressDialog,
+                                onShowCompressDialogChange = { showCompressDialog = it },
+                                onDismiss = { dismissExpand() },
+                                onTakePic = onLaunchCamera,
+                                onPickImage = { imagePickerLauncher.launch("image/*") },
+                                onPickVideo = { videoPickerLauncher.launch("video/*") },
+                                onPickAudio = { audioPickerLauncher.launch("audio/*") },
+                                onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
+                            )
+                        }
                     }
                 }
             }

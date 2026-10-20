@@ -715,6 +715,8 @@ data class DisplaySetting(
     val chatTextColor: Long? = null,
     val globalTextColor: Long? = null,
     val userBubbleColor: Long? = null,
+    // 用户消息字体颜色 (只影响用户发送内容的文字, null = 跟随气泡底色自动配色)
+    val userMessageFontColor: Long? = null,
     val assistantBubbleColor: Long? = null,
     val thinkingFontSizeRatio: Float = 1.0f,
     val thinkingBubbleColor: Long? = null,

@@ -58,6 +58,7 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
     var showChatTextColorPicker by remember { mutableStateOf(false) }
     var showGlobalTextColorPicker by remember { mutableStateOf(false) }
     var showUserBubbleColorPicker by remember { mutableStateOf(false) }
+    var showUserMessageFontColorPicker by remember { mutableStateOf(false) }
     var showAssistantBubbleColorPicker by remember { mutableStateOf(false) }
     var showThinkingBubbleColorPicker by remember { mutableStateOf(false) }
     var showChatBackgroundColorPicker by remember { mutableStateOf(false) }
@@ -86,6 +87,14 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
             defaultColor = MaterialTheme.colorScheme.secondaryContainer,
             onConfirm = { updateDisplaySetting(displaySetting.copy(userBubbleColor = it)) },
             onDismiss = { showUserBubbleColorPicker = false }
+        )
+    }
+    if (showUserMessageFontColorPicker) {
+        ColorPickerDialog(
+            initialColor = displaySetting.userMessageFontColor,
+            defaultColor = MaterialTheme.colorScheme.onPrimary,
+            onConfirm = { updateDisplaySetting(displaySetting.copy(userMessageFontColor = it)) },
+            onDismiss = { showUserMessageFontColorPicker = false }
         )
     }
     if (showAssistantBubbleColorPicker) {
@@ -205,6 +214,26 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                 TextButton(onClick = { showUserBubbleColorPicker = true }) { Text("自定义") }
                                 if (displaySetting.userBubbleColor != null) {
                                     TextButton(onClick = { updateDisplaySetting(displaySetting.copy(userBubbleColor = null)) }) { Text("重置") }
+                                }
+                            }
+                        },
+                    )
+                    item(
+                        headlineContent = { Text("用户消息字体颜色") },
+                        supportingContent = { Text("只改变用户发送内容的文字颜色，不设置则跟随气泡底色") },
+                        trailingContent = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .background(
+                                            displaySetting.userMessageFontColor?.let { it.toComposeColor() } ?: Color.Gray,
+                                            CircleShape
+                                        )
+                                )
+                                TextButton(onClick = { showUserMessageFontColorPicker = true }) { Text("自定义") }
+                                if (displaySetting.userMessageFontColor != null) {
+                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(userMessageFontColor = null)) }) { Text("重置") }
                                 }
                             }
                         },

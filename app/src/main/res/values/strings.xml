@@ -243,7 +243,7 @@
   <string name="cancel_edit">Cancel Edit</string>
   <string name="chain_of_thought_collapse">Collapse</string>
   <string name="chain_of_thought_show_more_steps">Show %d more steps</string>
-  <string name="chat_input_placeholder">Chat with AI</string>
+  <string name="chat_input_placeholder">Message to Daddy...</string>
   <string name="chat_input_unsupported_file_type">Unsupported file type: %s</string>
   <string name="chat_message_add_favorite">Add Favorite</string>
   <string name="chat_message_remove_favorite">Remove Favorite</string>
@@ -503,6 +503,7 @@
   <string name="model_list_search_placeholder">Enter model name to search</string>
   <string name="model_list_select_model">Select Model</string>
   <string name="more_options">More options</string>
+  <string name="voice_call">Voice Call</string>
   <string name="no_text_content_to_copy">No text content available to copy</string>
   <string name="notification_channel_chat_completed">Chat Completed</string>
   <string name="notification_channel_chat_live_update">Chat Generation Progress</string>

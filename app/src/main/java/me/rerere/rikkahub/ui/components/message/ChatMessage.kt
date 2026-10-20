@@ -13,6 +13,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -41,6 +42,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,6 +61,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
@@ -109,6 +113,7 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.components.ui.toComposeColor
 import me.rerere.rikkahub.ui.context.LocalDisplaySettings
+import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import androidx.compose.ui.text.font.Font
@@ -116,6 +121,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Image
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.base64Encode
+import me.rerere.rikkahub.utils.copyMessageToClipboard
+import me.rerere.rikkahub.utils.extractQuotedContentAsText
 import me.rerere.rikkahub.utils.openUrl
 import coil3.compose.AsyncImage
 import me.rerere.rikkahub.utils.splitIntoBubbleSegments
@@ -169,8 +176,18 @@ fun ChatMessage(
     val navController = LocalNavController.current
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
+    val tts = LocalTTSState.current
+    val isSpeaking by tts.isSpeaking.collectAsState()
+    val displaySettings = LocalDisplaySettings.current
+    // 长按消息弹出操作面板 (微信式交互, 定稿 UI: 移除消息下方常驻图标行)
     Column(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .pointerInput(message.id) {
+                detectTapGestures(onLongPress = {
+                    showActionsSheet = true
+                })
+            },
         horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -217,33 +234,7 @@ fun ChatMessage(
             }
         }
  
-        val showActions = if (lastMessage) {
-            !loading
-        } else {
-            message.parts.isEmptyUIMessage().not()
-        }
- 
-        AnimatedVisibility(
-            visible = showActions,
-            enter = slideInVertically { it / 2 } + fadeIn(),
-            exit = slideOutVertically { it / 2 } + fadeOut()
-        ) {
-            Column(
-                modifier = Modifier.animateContentSize()
-            ) {
-                ChatMessageActionButtons(
-                    message = message,
-                    onRegenerate = onRegenerate,
-                    node = node,
-                    onUpdate = onUpdate,
-                    onOpenActionSheet = {
-                        showActionsSheet = true
-                    },
-                    onTranslate = onTranslate,
-                    onClearTranslation = onClearTranslation
-                )
-            }
-        }
+        // 定稿 UI: 消息下方常驻操作图标行已移除, 全部收纳到长按弹出的操作面板中
  
         ProvideTextStyle(textStyle) {
             ChatMessageNerdLine(message = message)
@@ -262,6 +253,29 @@ fun ChatMessage(
             },
             isFavorite = isFavorite,
             onToggleFavorite = onToggleFavorite,
+            onCopy = {
+                context.copyMessageToClipboard(message)
+            },
+            onRegenerate = onRegenerate,
+            onSpeak = if (message.role == MessageRole.ASSISTANT) { {
+                if (!isSpeaking) {
+                    val text = message.parts
+                        .filterIsInstance<UIMessagePart.Text>()
+                        .joinToString("\n\n") { it.text }
+                        .trim()
+                    val textToSpeak = if (displaySettings.ttsOnlyReadQuoted) {
+                        text.extractQuotedContentAsText() ?: text
+                    } else {
+                        text
+                    }
+                    tts.speak(textToSpeak)
+                } else {
+                    tts.stop()
+                }
+            } } else null,
+            isSpeaking = isSpeaking,
+            onTranslate = onTranslate,
+            onClearTranslation = onClearTranslation,
             onWebViewPreview = {
                 val textContent = message.parts
                     .filterIsInstance<UIMessagePart.Text>()
@@ -292,6 +306,22 @@ fun ChatMessage(
     }
 }
  
+/**
+ * 用户消息字体颜色: 设置了 userMessageFontColor 时, 覆盖用户气泡内文字颜色
+ * (通过 LocalTextStyle 覆盖, 同时兼容显式 chatTextColor 与默认主题色两种情况)
+ */
+@Composable
+private fun UserMessageTextColor(content: @Composable () -> Unit) {
+    val displaySettings = LocalDisplaySettings.current
+    val fontColor = displaySettings.userMessageFontColor?.let { it.toComposeColor() }
+    if (fontColor != null) {
+        val merged = LocalTextStyle.current.copy(color = fontColor)
+        CompositionLocalProvider(LocalTextStyle provides merged, content = content)
+    } else {
+        content()
+    }
+}
+
 @OptIn(FlowPreview::class)
 @Composable
 private fun MessagePartsBlock(
@@ -415,14 +445,16 @@ private fun MessagePartsBlock(
                                                         bubbleAlpha = bubbleAlpha,
                                                         onClick = { onUserMessageClick?.invoke() },
                                                     ) {
-                                                        MarkdownBlock(
-                                                            content = segment.replaceRegexes(
-                                                                assistant = assistant,
-                                                                scope = AssistantAffectScope.USER,
-                                                                visual = true,
-                                                            ),
-                                                            onClickCitation = handleClickCitation
-                                                        )
+                                                        UserMessageTextColor {
+                                                            MarkdownBlock(
+                                                                content = segment.replaceRegexes(
+                                                                    assistant = assistant,
+                                                                    scope = AssistantAffectScope.USER,
+                                                                    visual = true,
+                                                                ),
+                                                                onClickCitation = handleClickCitation
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
@@ -436,14 +468,16 @@ private fun MessagePartsBlock(
                                             bubbleAlpha = bubbleAlpha,
                                             onClick = { onUserMessageClick?.invoke() },
                                         ) {
-                                            MarkdownBlock(
-                                                content = displayText.replaceRegexes(
-                                                    assistant = assistant,
-                                                    scope = AssistantAffectScope.USER,
-                                                    visual = true,
-                                                ),
-                                                onClickCitation = handleClickCitation
-                                            )
+                                            UserMessageTextColor {
+                                                MarkdownBlock(
+                                                    content = displayText.replaceRegexes(
+                                                        assistant = assistant,
+                                                        scope = AssistantAffectScope.USER,
+                                                        visual = true,
+                                                    ),
+                                                    onClickCitation = handleClickCitation
+                                                )
+                                            }
                                         }
                                     }
                                 } else if (assistant?.splitBubbleByLine == true) {

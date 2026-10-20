@@ -220,10 +220,11 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         onExpandedChange = { state.onExpandedChange(it, loading) },
         icon = {
             // ♡ 字形贴着字体基线渲染, 视觉上偏高; 轻微下移使其在图标框内上下居中
+            // 图标与折叠标题使用同一透明度 (0.5f), 整体弱化存在感但不消失
             Text(
                 text = "♡",
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.secondary,
+                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
                 modifier = Modifier.offset(y = 1.5.dp),
             )
         },
@@ -232,12 +233,12 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 ReasoningTitle(title = thinkingTitle!!)
             } else {
                 Text(
-                    text = stringResource(
-                        R.string.deep_thinking_seconds,
-                        state.duration.toDouble(DurationUnit.SECONDS).toFloat()
+                    // 英文折叠标题, 弱化思考链存在感 (定稿 UI)
+                    text = "Thought for %.1fs".format(
+                        state.duration.toDouble(DurationUnit.SECONDS)
                     ),
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.secondary,
+                    color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }
@@ -247,7 +248,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 Text(
                     text = state.duration.toString(DurationUnit.SECONDS, 1),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary,
+                    color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }

@@ -457,9 +457,10 @@ class WebDavSync(
         }
 
         try {
-            // 检查 conversationentity 表是否存在
+            // 检查 conversationentity 表是否存在 (大小写不敏感: Room 表名实为驼峰 "ConversationEntity",
+            // 旧代码用全小写精确匹配导致 sqlite_master 查不到, 导入被静默跳过 — "导入成功但没有对话"的根因)
             val tableCursor = sqliteDb.rawQuery(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='conversationentity'", null
+                "SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name)=LOWER('conversationentity')", null
             )
             val hasTable = tableCursor.use { it.moveToFirst() && it.count > 0 }
             if (!hasTable) {
@@ -479,7 +480,7 @@ class WebDavSync(
             // 新版备份将消息存在 message_node 表 (conversationentity.nodes 恒为 "[]"),
             // 因此需要额外读取该表, 否则导入的对话会没有消息.
             val messageNodeTableCursor = sqliteDb.rawQuery(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='message_node'", null
+                "SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name)=LOWER('message_node')", null
             )
             val hasMessageNodeTable = messageNodeTableCursor.use { it.moveToFirst() && it.count > 0 }
             val messageNodesByConversation = if (hasMessageNodeTable) {
