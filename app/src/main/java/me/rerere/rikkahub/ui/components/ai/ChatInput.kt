@@ -694,7 +694,13 @@ fun ChatInput(
                         color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
                     ) {
                         Column {
-                            // 定稿 UI: 模型选择/联网搜索/思考深度 收纳进加号面板
+                            // 定稿 UI: 加号面板分区 (模型 / 搜索与思考 / 附件)
+                            Text(
+                                text = "模型 / 搜索与思考",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 14.dp, top = 8.dp),
+                            )
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()

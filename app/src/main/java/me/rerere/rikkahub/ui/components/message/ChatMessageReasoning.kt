@@ -219,13 +219,13 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
         onExpandedChange = { state.onExpandedChange(it, loading) },
         icon = {
-            // ♡ 字形贴着字体基线渲染, 视觉上偏高; 轻微下移使其在图标框内上下居中
+            // ♡ 图标在图标框内垂直居中 (用户反馈偏下, 上移)
             // 图标与折叠标题使用同一透明度 (0.5f), 整体弱化存在感但不消失
             Text(
                 text = "♡",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
-                modifier = Modifier.offset(y = 1.5.dp),
+                modifier = Modifier.offset(y = (-1).dp),
             )
         },
         label = {
