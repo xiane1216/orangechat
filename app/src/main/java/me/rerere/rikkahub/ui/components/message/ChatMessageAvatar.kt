@@ -42,7 +42,7 @@ import me.rerere.rikkahub.utils.toLocalString
 import java.io.File
 
 @Composable
-private fun AvatarFrameOverlay(
+fun AvatarFrameOverlay(
     framePath: String,
     offsetX: Float,
     offsetY: Float,

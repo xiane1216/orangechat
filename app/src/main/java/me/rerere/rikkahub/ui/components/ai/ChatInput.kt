@@ -495,9 +495,123 @@ fun ChatInput(
                 .imePadding()
                 .navigationBarsPadding()
                 .padding(horizontal = 8.dp),
-            // 定稿 UI: 加号面板展开时显示在输入条上方 (ReverseOrder 把后声明的 Expanded 排到前面)
-            verticalArrangement = Arrangement.ReverseOrder
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Expanded content
+            Box(
+                modifier = Modifier
+                    .animateContentSize()
+                    .fillMaxWidth()
+            ) {
+                BackHandler(
+                    enabled = expand != ExpandState.Collapsed,
+                ) {
+                    dismissExpand()
+                }
+                if (expand == ExpandState.Files) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .then(
+                                if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
+                                    state = hazeState,
+                                    style = HazeMaterials.ultraThin()
+                                )
+                                else Modifier
+                            ),
+                        shape = RoundedCornerShape(20.dp),
+                        tonalElevation = 0.dp,
+                        color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
+                    ) {
+                        Column {
+                            // 定稿 UI: 加号面板分区 (模型 / 搜索与思考 / 附件)
+                            Text(
+                                text = "模型 / 搜索与思考",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 14.dp, top = 8.dp),
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                // Model Picker
+                                ModelSelector(
+                                    modelId = assistant.chatModelId ?: settings.chatModelId,
+                                    providers = settings.providers,
+                                    onSelect = {
+                                        onUpdateChatModel(it)
+                                        dismissExpand()
+                                    },
+                                    type = ModelType.CHAT,
+                                    onlyIcon = true,
+                                    modifier = Modifier,
+                                )
+
+                                // Search
+                                val enableSearchMsg = stringResource(R.string.web_search_enabled)
+                                val disableSearchMsg = stringResource(R.string.web_search_disabled)
+                                val chatModel = settings.getCurrentChatModel()
+                                SearchPickerButton(
+                                    enableSearch = enableSearch,
+                                    settings = settings,
+                                    onToggleSearch = { enabled ->
+                                        onToggleSearch(enabled)
+                                        toaster.show(
+                                            message = if (enabled) enableSearchMsg else disableSearchMsg,
+                                            duration = 1.seconds,
+                                            type = if (enabled) {
+                                                ToastType.Success
+                                            } else {
+                                                ToastType.Normal
+                                            }
+                                        )
+                                    },
+                                    onUpdateSearchService = onUpdateSearchService,
+                                    model = chatModel,
+                                )
+
+                                // Reasoning
+                                val model = settings.getCurrentChatModel()
+                                if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
+                                    ReasoningButton(
+                                        reasoningLevel = assistant.reasoningLevel,
+                                        onUpdateReasoningLevel = {
+                                            onUpdateAssistant(assistant.copy(reasoningLevel = it))
+                                        },
+                                        onlyIcon = true,
+                                    )
+                                }
+                            }
+
+                            FilesPicker(
+                                conversation = conversation,
+                                state = state,
+                                assistant = assistant,
+                                mcpManager = mcpManager,
+                                onCompressContext = onCompressContext,
+                                onUpdateAssistant = onUpdateAssistant,
+                                showInjectionSheet = showInjectionSheet,
+                                onShowInjectionSheetChange = { showInjectionSheet = it },
+                                showCompressDialog = showCompressDialog,
+                                onShowCompressDialogChange = { showCompressDialog = it },
+                                onDismiss = { dismissExpand() },
+                                onTakePic = onLaunchCamera,
+                                onPickImage = { imagePickerLauncher.launch("image/*") },
+                                onPickVideo = { videoPickerLauncher.launch("video/*") },
+                                onPickAudio = { audioPickerLauncher.launch("audio/*") },
+                                onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
+                            )
+                        }
+                    }
+                }
+            }
+
             // Input area with optional background image
             Surface(
                 modifier = Modifier
@@ -661,121 +775,6 @@ fun ChatInput(
                                     }
                                 }
                             }
-                        }
-                    }
-                }
-            }
-
-            // Expanded content
-            Box(
-                modifier = Modifier
-                    .animateContentSize()
-                    .fillMaxWidth()
-            ) {
-                BackHandler(
-                    enabled = expand != ExpandState.Collapsed,
-                ) {
-                    dismissExpand()
-                }
-                if (expand == ExpandState.Files) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(20.dp))
-                            .then(
-                                if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
-                                    state = hazeState,
-                                    style = HazeMaterials.ultraThin()
-                                )
-                                else Modifier
-                            ),
-                        shape = RoundedCornerShape(20.dp),
-                        tonalElevation = 0.dp,
-                        color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
-                    ) {
-                        Column {
-                            // 定稿 UI: 加号面板分区 (模型 / 搜索与思考 / 附件)
-                            Text(
-                                text = "模型 / 搜索与思考",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 14.dp, top = 8.dp),
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState())
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                // Model Picker
-                                ModelSelector(
-                                    modelId = assistant.chatModelId ?: settings.chatModelId,
-                                    providers = settings.providers,
-                                    onSelect = {
-                                        onUpdateChatModel(it)
-                                        dismissExpand()
-                                    },
-                                    type = ModelType.CHAT,
-                                    onlyIcon = true,
-                                    modifier = Modifier,
-                                )
-
-                                // Search
-                                val enableSearchMsg = stringResource(R.string.web_search_enabled)
-                                val disableSearchMsg = stringResource(R.string.web_search_disabled)
-                                val chatModel = settings.getCurrentChatModel()
-                                SearchPickerButton(
-                                    enableSearch = enableSearch,
-                                    settings = settings,
-                                    onToggleSearch = { enabled ->
-                                        onToggleSearch(enabled)
-                                        toaster.show(
-                                            message = if (enabled) enableSearchMsg else disableSearchMsg,
-                                            duration = 1.seconds,
-                                            type = if (enabled) {
-                                                ToastType.Success
-                                            } else {
-                                                ToastType.Normal
-                                            }
-                                        )
-                                    },
-                                    onUpdateSearchService = onUpdateSearchService,
-                                    model = chatModel,
-                                )
-
-                                // Reasoning
-                                val model = settings.getCurrentChatModel()
-                                if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
-                                    ReasoningButton(
-                                        reasoningLevel = assistant.reasoningLevel,
-                                        onUpdateReasoningLevel = {
-                                            onUpdateAssistant(assistant.copy(reasoningLevel = it))
-                                        },
-                                        onlyIcon = true,
-                                    )
-                                }
-                            }
-
-                            FilesPicker(
-                                conversation = conversation,
-                                state = state,
-                                assistant = assistant,
-                                mcpManager = mcpManager,
-                                onCompressContext = onCompressContext,
-                                onUpdateAssistant = onUpdateAssistant,
-                                showInjectionSheet = showInjectionSheet,
-                                onShowInjectionSheetChange = { showInjectionSheet = it },
-                                showCompressDialog = showCompressDialog,
-                                onShowCompressDialogChange = { showCompressDialog = it },
-                                onDismiss = { dismissExpand() },
-                                onTakePic = onLaunchCamera,
-                                onPickImage = { imagePickerLauncher.launch("image/*") },
-                                onPickVideo = { videoPickerLauncher.launch("video/*") },
-                                onPickAudio = { audioPickerLauncher.launch("audio/*") },
-                                onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
-                            )
                         }
                     }
                 }
