@@ -159,6 +159,9 @@ android {
         jniLibs {
             useLegacyPackaging = true
             pickFirsts += "lib/*/libtermux.so"
+            // 所有 .so 均为依赖库预编译产物（本工程无原生代码编译），
+            // 保留调试符号可跳过 NDK strip 步骤，新环境无需下载约 2GB 的 NDK 即可构建
+            keepDebugSymbols += "**/*.so"
         }
     }
     tasks.withType<KotlinCompile>().configureEach {
