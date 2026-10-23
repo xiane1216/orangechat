@@ -29,19 +29,20 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
@@ -55,8 +56,6 @@ import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
-
-private val LocalCardColor = staticCompositionLocalOf { Color.White }
 
 /**
  * 以时间线/步骤卡片的形式展示一组思考过程。
@@ -99,26 +98,11 @@ fun <T> ChainOfThought(
         disabledContentColor = cardColors.disabledContentColor,
     )
 
-    // 图标垫块色: 气泡色与聊天背景色的预混合 (不透明)。
-    // 垫块画在半透明气泡之上, 若再叠一层半透明同色会"越叠越实"露出方块;
-    // 预混后垫块视觉 = 气泡实际观感, 透明度调多少都不会出现实心方底。
-    // (仅遮挡背后时间线连线用, 爱心/图标本身不透明, 不受影响)
-    val chatBgColor = settings.displaySetting.chatBackgroundColor?.let { it.toComposeColor() }
-        ?: MaterialTheme.colorScheme.background
-    val iconBackingColor = lerp(
-        start = chatBgColor,
-        stop = thinkingBubbleColor ?: cardColors.containerColor,
-        fraction = thinkingAlpha,
-    )
-
-    CompositionLocalProvider(
-        LocalCardColor provides iconBackingColor
-    ) {
     Card(
-            modifier = modifier,
-            colors = effectiveCardColors,
-            shape = RoundedCornerShape(16.dp),
-        ) {
+        modifier = modifier,
+        colors = effectiveCardColors,
+        shape = RoundedCornerShape(16.dp),
+    ) {
             Column(
                 modifier = Modifier
                     .padding(horizontal = 12.dp, vertical = 4.dp)
@@ -181,16 +165,19 @@ fun <T> ChainOfThought(
                 val lineColor = MaterialTheme.colorScheme.outlineVariant
                 val scope = remember { ChainOfThoughtScopeImpl() }
                 Box(
-                    modifier = Modifier.drawBehind {
-                        val x = 12.dp.toPx()
-                        val offsetPx = 18.dp.toPx()
-                        drawLine(
-                            color = lineColor,
-                            start = Offset(x, offsetPx),
-                            end = Offset(x, size.height - offsetPx),
-                            strokeWidth = 1.dp.toPx()
-                        )
-                    }
+                    modifier = Modifier
+                        // 独立离屏层: 让图标的挖洞(Clear)只裁掉本层连线, 不会穿透到卡片背景
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawBehind {
+                            val x = 12.dp.toPx()
+                            val offsetPx = 18.dp.toPx()
+                            drawLine(
+                                color = lineColor,
+                                start = Offset(x, offsetPx),
+                                end = Offset(x, size.height - offsetPx),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                        }
                 ) {
                     Column {
                         visibleSteps.fastForEach { step ->
@@ -201,7 +188,6 @@ fun <T> ChainOfThought(
             }
         }
     }
-}
 
 /**
  * [ChainOfThought] 内部使用的步骤渲染作用域。
@@ -359,7 +345,8 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Icon（不透明背景遮住背后的连线）
+                // Icon（垫块 = 透明挖洞: 在离屏层里裁掉背后的时间线连线,
+                // 洞里直接透出卡片背景/聊天背景图, 任何气泡颜色和透明度下都无色块）
                 Box(
                     modifier = Modifier.width(24.dp),
                     contentAlignment = Alignment.Center,
@@ -367,7 +354,10 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                     Box(
                         modifier = Modifier
                             .size(20.dp)
-                            .background(LocalCardColor.current),
+                            .drawWithContent {
+                                drawRect(color = Color.Transparent, blendMode = BlendMode.Clear)
+                                drawContent()
+                            },
                         contentAlignment = Alignment.Center,
                     ) {
                         if (icon != null) {
