@@ -17,11 +17,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,17 +41,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
+import com.composables.icons.lucide.Heart
+import com.composables.icons.lucide.Lucide
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
+import me.rerere.rikkahub.ui.components.ui.toComposeColor
 import me.rerere.rikkahub.ui.context.LocalDisplaySettings
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.extractThinkingTitle
@@ -131,13 +134,16 @@ private fun ReasoningContent(
     scrollState: ScrollState,
     fadeHeight: Float,
     loading: Boolean,
+    thinkingColor: Color? = null,
 ) {
     val isPreview = expandState == ReasoningCardState.Preview
     val displaySettings = LocalDisplaySettings.current
     val thinkingStyle = MaterialTheme.typography.bodySmall.copy(
         fontSize = MaterialTheme.typography.bodySmall.fontSize * displaySettings.thinkingFontSizeRatio,
         lineHeight = MaterialTheme.typography.bodySmall.lineHeight * displaySettings.thinkingFontSizeRatio,
-    )
+    ).let { style ->
+        if (thinkingColor != null) style.copy(color = thinkingColor) else style
+    }
  
     Column(
         modifier = Modifier
@@ -214,22 +220,25 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     val (state, loading) = rememberReasoningState(reasoning)
     val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
     val showThinkingTitle = loading && thinkingTitle != null
- 
+    // 思考链字体颜色: 自定义设置优先 (♡ / 标题 / 内容统一), null 时跟随主题 secondary
+    val customThinkingColor = LocalDisplaySettings.current.thinkingTextColor?.let { it.toComposeColor() }
+    val thinkingColor = customThinkingColor ?: MaterialTheme.colorScheme.secondary
+
     ControlledChainOfThoughtStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
         onExpandedChange = { state.onExpandedChange(it, loading) },
         icon = {
-            // ♡ 字形在图标框内垂直居中 (仅保留位置修正)
-            Text(
-                text = "♡",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.offset(y = (-1).dp),
+            // Lucide 描边爱心 (镂空字形), 替代 Unicode "♡" 避免被中文字体渲染成实心
+            Icon(
+                imageVector = Lucide.Heart,
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+                tint = thinkingColor,
             )
         },
         label = {
             if (showThinkingTitle) {
-                ReasoningTitle(title = thinkingTitle!!)
+                ReasoningTitle(title = thinkingTitle!!, color = thinkingColor)
             } else {
                 Text(
                     text = stringResource(
@@ -237,7 +246,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                         state.duration.toDouble(DurationUnit.SECONDS).toFloat()
                     ),
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.secondary,
+                    color = thinkingColor,
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }
@@ -247,7 +256,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 Text(
                     text = state.duration.toString(DurationUnit.SECONDS, 1),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary,
+                    color = thinkingColor,
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }
@@ -262,6 +271,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 scrollState = state.scrollState,
                 fadeHeight = fadeHeight,
                 loading = loading,
+                thinkingColor = customThinkingColor,
             )
         },
     )
@@ -269,7 +279,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
  
  
 @Composable
-private fun ReasoningTitle(title: String) {
+private fun ReasoningTitle(title: String, color: Color) {
     AnimatedContent(
         targetState = title,
         transitionSpec = {
@@ -281,7 +291,7 @@ private fun ReasoningTitle(title: String) {
         Text(
             text = it,
             style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.secondary,
+            color = color,
             modifier = Modifier
                 .padding(horizontal = 4.dp)
                 .shimmer(true),

@@ -613,6 +613,8 @@ fun ChatInput(
             }
 
             // Input area with optional background image (定稿: 整体胶囊形)
+            // 输入框颜色: 自定义 inputFieldColor 优先 (含毛玻璃模式), 有背景图时图片优先
+            val inputColor = settings.displaySetting.inputFieldColor?.let { it.toComposeColor() } ?: hazeTintColor
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -620,16 +622,19 @@ fun ChatInput(
                     .then(
                         if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
                             state = hazeState,
-                            style = HazeMaterials.ultraThin(containerColor = hazeTintColor)
+                            style = HazeMaterials.ultraThin(containerColor = inputColor)
                         )
                         else Modifier
                     ),
                 shape = RoundedCornerShape(26.dp),
                 tonalElevation = 0.dp,
-                // When background image is set, make surface transparent so image is visible
-                color = if (inputBgBitmap != null) Color.Transparent
-                    else if (settings.displaySetting.enableBlurEffect) Color.Transparent
-                    else settings.displaySetting.inputFieldColor?.let { it.toComposeColor() } ?: hazeTintColor,
+                // When background image is set, make surface transparent so image is visible;
+                // blur mode: surface transparent, color tint comes from haze layer
+                color = if (inputBgBitmap != null || settings.displaySetting.enableBlurEffect) {
+                    Color.Transparent
+                } else {
+                    inputColor
+                },
             ) {
                 // Use Box so background image can match parent size
                 Box {
@@ -840,6 +845,9 @@ private fun TextInputRow(
 
         var isFocused by remember { mutableStateOf(false) }
         var isFullScreen by remember { mutableStateOf(false) }
+        // 内层小胶囊颜色: 自定义输入框颜色的半透明版, 未设置时保持主题默认
+        val customFieldColor = displaySettings.inputFieldColor?.let { it.toComposeColor() }?.copy(alpha = 0.5f)
+            ?: MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f)
         val receiveContentListener = remember(
             displaySettings.pasteLongTextAsFile, displaySettings.pasteLongTextThreshold
         ) {
@@ -903,8 +911,8 @@ private fun TextInputRow(
             colors = TextFieldDefaults.colors().copy(
                 unfocusedIndicatorColor = Color.Transparent,
                 focusedIndicatorColor = Color.Transparent,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                focusedContainerColor = customFieldColor,
+                unfocusedContainerColor = customFieldColor,
             ),
             trailingIcon = {
                 if (isFocused) {

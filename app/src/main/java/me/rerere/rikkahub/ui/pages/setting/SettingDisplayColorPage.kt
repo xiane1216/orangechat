@@ -61,6 +61,7 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
     var showUserMessageFontColorPicker by remember { mutableStateOf(false) }
     var showAssistantBubbleColorPicker by remember { mutableStateOf(false) }
     var showThinkingBubbleColorPicker by remember { mutableStateOf(false) }
+    var showThinkingTextColorPicker by remember { mutableStateOf(false) }
     var showChatBackgroundColorPicker by remember { mutableStateOf(false) }
     var showPrimaryColorPicker by remember { mutableStateOf(false) }
     var showInputFieldColorPicker by remember { mutableStateOf(false) }
@@ -111,6 +112,14 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
             defaultColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             onConfirm = { updateDisplaySetting(displaySetting.copy(thinkingBubbleColor = it)) },
             onDismiss = { showThinkingBubbleColorPicker = false }
+        )
+    }
+    if (showThinkingTextColorPicker) {
+        ColorPickerDialog(
+            initialColor = displaySetting.thinkingTextColor,
+            defaultColor = MaterialTheme.colorScheme.secondary,
+            onConfirm = { updateDisplaySetting(displaySetting.copy(thinkingTextColor = it)) },
+            onDismiss = { showThinkingTextColorPicker = false }
         )
     }
     if (showChatBackgroundColorPicker) {
@@ -273,6 +282,26 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                 TextButton(onClick = { showThinkingBubbleColorPicker = true }) { Text("自定义") }
                                 if (displaySetting.thinkingBubbleColor != null) {
                                     TextButton(onClick = { updateDisplaySetting(displaySetting.copy(thinkingBubbleColor = null)) }) { Text("重置") }
+                                }
+                            }
+                        },
+                    )
+                    item(
+                        headlineContent = { Text("思考链字体颜色") },
+                        supportingContent = { Text("♡ 图标、\"思考了X秒\"标题和思考内容的颜色") },
+                        trailingContent = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .background(
+                                            displaySetting.thinkingTextColor?.let { it.toComposeColor() } ?: Color.Gray,
+                                            CircleShape
+                                        )
+                                )
+                                TextButton(onClick = { showThinkingTextColorPicker = true }) { Text("自定义") }
+                                if (displaySetting.thinkingTextColor != null) {
+                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(thinkingTextColor = null)) }) { Text("重置") }
                                 }
                             }
                         },

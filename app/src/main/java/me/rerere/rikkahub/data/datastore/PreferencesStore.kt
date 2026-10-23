@@ -720,6 +720,8 @@ data class DisplaySetting(
     val assistantBubbleColor: Long? = null,
     val thinkingFontSizeRatio: Float = 1.0f,
     val thinkingBubbleColor: Long? = null,
+    // 思考链字体颜色 (♡图标 / "思考了X秒"标题 / 思考内容, null = 跟随主题)
+    val thinkingTextColor: Long? = null,
     val chatBackgroundColor: Long? = null,
     val primaryColor: Long? = null,
     val inputFieldColor: Long? = null,

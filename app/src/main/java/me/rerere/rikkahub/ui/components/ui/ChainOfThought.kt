@@ -99,7 +99,9 @@ fun <T> ChainOfThought(
     )
 
     CompositionLocalProvider(
-        LocalCardColor provides cardColors.containerColor
+        // 图标垫块需与卡片实际渲染色一致 (含自定义思考链气泡色与透明度),
+        // 否则设置自定义气泡色后图标后会露出一块默认色的方底
+        LocalCardColor provides effectiveCardColors.containerColor
     ) {
     Card(
             modifier = modifier,
