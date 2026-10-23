@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
@@ -98,10 +99,20 @@ fun <T> ChainOfThought(
         disabledContentColor = cardColors.disabledContentColor,
     )
 
+    // 图标垫块色: 气泡色与聊天背景色的预混合 (不透明)。
+    // 垫块画在半透明气泡之上, 若再叠一层半透明同色会"越叠越实"露出方块;
+    // 预混后垫块视觉 = 气泡实际观感, 透明度调多少都不会出现实心方底。
+    // (仅遮挡背后时间线连线用, 爱心/图标本身不透明, 不受影响)
+    val chatBgColor = settings.displaySetting.chatBackgroundColor?.let { it.toComposeColor() }
+        ?: MaterialTheme.colorScheme.background
+    val iconBackingColor = lerp(
+        start = chatBgColor,
+        stop = thinkingBubbleColor ?: cardColors.containerColor,
+        fraction = thinkingAlpha,
+    )
+
     CompositionLocalProvider(
-        // 图标垫块需与卡片实际渲染色一致 (含自定义思考链气泡色与透明度),
-        // 否则设置自定义气泡色后图标后会露出一块默认色的方底
-        LocalCardColor provides effectiveCardColors.containerColor
+        LocalCardColor provides iconBackingColor
     ) {
     Card(
             modifier = modifier,
