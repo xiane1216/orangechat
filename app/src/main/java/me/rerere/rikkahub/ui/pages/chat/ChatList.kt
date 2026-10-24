@@ -89,7 +89,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceAtLeast
 import androidx.compose.ui.zIndex
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -315,7 +314,6 @@ private fun ChatListNormal(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
                 .fillMaxSize()
-                .hazeSource(state = hazeState)
                 .padding(top = innerPadding.calculateTopPadding()),
         ) {
             itemsIndexed(
@@ -623,8 +621,7 @@ private fun ChatListPreview(
     Column(
         modifier = Modifier
             .padding(top = innerPadding.calculateTopPadding())
-            .fillMaxSize()
-            .hazeSource(state = hazeState),
+            .fillMaxSize(),
     ) {
         // 搜索框
         OutlinedTextField(

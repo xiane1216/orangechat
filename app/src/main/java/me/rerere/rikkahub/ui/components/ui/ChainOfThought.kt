@@ -59,7 +59,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.ui.context.LocalHazeState
 import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.materials.HazeMaterials
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
 
 /**
  * 以时间线/步骤卡片的形式展示一组思考过程。
@@ -96,28 +97,43 @@ fun <T> ChainOfThought(
 
     val thinkingBubbleColor = settings.displaySetting.thinkingBubbleColor?.let { it.toComposeColor() }
     val hazeState = LocalHazeState.current
+    // 气泡磨砂玻璃 (iMessage 风格): 生效条件 = 开关开启 + 存在聊天背景图/背景色
+    val glass = settings.displaySetting.bubbleGlassEnabled && hazeState != null && (
+        settings.getCurrentAssistant().background != null ||
+            settings.displaySetting.chatBackgroundColor != null
+        )
     val effectiveCardColors = CardDefaults.cardColors(
-        containerColor = (thinkingBubbleColor ?: cardColors.containerColor).copy(alpha = thinkingAlpha),
+        // 磨砂模式下底色透明, 由磨砂层提供气泡色调 (透明度设置继续联动)
+        containerColor = if (glass) {
+            Color.Transparent
+        } else {
+            (thinkingBubbleColor ?: cardColors.containerColor).copy(alpha = thinkingAlpha)
+        },
         contentColor = cardColors.contentColor,
         disabledContainerColor = cardColors.disabledContainerColor,
         disabledContentColor = cardColors.disabledContentColor,
     )
 
     Card(
-        modifier = modifier.then(
-            // 气泡磨砂玻璃: 模糊透出聊天背景颜色 (iMessage 风格)
-            // tint 用思考链气泡色本身, 不发白/发黑
-            if (settings.displaySetting.bubbleGlassEnabled && hazeState != null && (
-                settings.getCurrentAssistant().background != null ||
-                    settings.displaySetting.chatBackgroundColor != null
-                )
-            ) {
-                Modifier.hazeEffect(
-                    state = hazeState,
-                    style = HazeMaterials.thin(containerColor = thinkingBubbleColor ?: cardColors.containerColor)
-                )
-            } else Modifier
-        ),
+        modifier = modifier
+            // 先裁圆角再模糊: 磨砂层不会溢出卡片圆角
+            .clip(RoundedCornerShape(settings.displaySetting.bubbleCornerRadius.dp))
+            .then(
+                if (glass) {
+                    Modifier.hazeEffect(
+                        state = hazeState!!,
+                        // tint = 思考链气泡色 × 用户透明度: 模糊透出背景图颜色, 不发白/不发黑
+                        style = HazeStyle(
+                            backgroundColor = Color.Transparent,
+                            tints = listOf(
+                                HazeTint(
+                                    (thinkingBubbleColor ?: cardColors.containerColor).copy(alpha = thinkingAlpha)
+                                )
+                            ),
+                        )
+                    )
+                } else Modifier
+            ),
         colors = effectiveCardColors,
         // 形状对齐聊天气泡: 跟随"气泡圆角"设置
         shape = RoundedCornerShape(settings.displaySetting.bubbleCornerRadius.dp),

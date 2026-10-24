@@ -114,7 +114,8 @@ import me.rerere.rikkahub.ui.context.LocalHazeState
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.materials.HazeMaterials
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import androidx.compose.ui.text.font.Font
@@ -788,15 +789,21 @@ private fun BubbleSurface(
         Surface(
             modifier = Modifier
                 .animateContentSize()
+                // 先裁圆角再模糊: 磨砂层不会溢出气泡圆角
+                .clip(RoundedCornerShape(cornerRadius))
                 .then(
                     if (glass) Modifier.hazeEffect(
                         state = hazeState,
-                        // tint 用气泡色本身: 磨砂层带气泡色调, 只透背景颜色, 不会发白/发黑
-                        style = HazeMaterials.thin(containerColor = color)
+                        // tint = 气泡色 × 用户透明度: 模糊透出背景图颜色, 不发白/不发黑
+                        style = HazeStyle(
+                            backgroundColor = Color.Transparent,
+                            tints = listOf(HazeTint(color.copy(alpha = bubbleAlpha))),
+                        )
                     ) else Modifier
                 ),
             shape = RoundedCornerShape(cornerRadius),
-            color = color.copy(alpha = bubbleAlpha),
+            // 磨砂模式下底色透明, 由磨砂层提供气泡色调 (透明度设置继续联动)
+            color = if (glass) Color.Transparent else color.copy(alpha = bubbleAlpha),
             onClick = onClick ?: {},
         ) {
             Column(modifier = Modifier.padding(8.dp)) { content() }
