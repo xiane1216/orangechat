@@ -58,6 +58,7 @@ import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.ui.context.LocalHazeState
+import me.rerere.rikkahub.ui.context.LocalDisplaySettings
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.HazeTint
@@ -89,18 +90,20 @@ fun <T> ChainOfThought(
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
     val settings = LocalSettings.current
-    val thinkingAlpha = 1f - settings.displaySetting.thinkingChainTransparency / 100f
+    // 颜色相关读取深浅色颜色方案生效后的值 (LocalDisplaySettings 已按方案覆盖)
+    val dsp = LocalDisplaySettings.current
+    val thinkingAlpha = 1f - dsp.thinkingChainTransparency / 100f
 
     var expanded by remember { mutableStateOf(false) }
     val canCollapse = steps.size > collapsedVisibleCount
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
 
-    val thinkingBubbleColor = settings.displaySetting.thinkingBubbleColor?.let { it.toComposeColor() }
+    val thinkingBubbleColor = dsp.thinkingBubbleColor?.let { it.toComposeColor() }
     val hazeState = LocalHazeState.current
     // 气泡磨砂玻璃 (iMessage 风格): 生效条件 = 开关开启 + 存在聊天背景图/背景色
-    val glass = settings.displaySetting.bubbleGlassEnabled && hazeState != null && (
+    val glass = dsp.bubbleGlassEnabled && hazeState != null && (
         settings.getCurrentAssistant().background != null ||
-            settings.displaySetting.chatBackgroundColor != null
+            dsp.chatBackgroundColor != null
         )
     val effectiveCardColors = CardDefaults.cardColors(
         // 磨砂模式下底色透明, 由磨砂层提供气泡色调 (透明度设置继续联动)
@@ -117,7 +120,7 @@ fun <T> ChainOfThought(
     Card(
         modifier = modifier
             // 先裁圆角再模糊: 磨砂层不会溢出卡片圆角
-            .clip(RoundedCornerShape(settings.displaySetting.bubbleCornerRadius.dp))
+            .clip(RoundedCornerShape(dsp.bubbleCornerRadius.dp))
             .then(
                 if (glass) {
                     Modifier.hazeEffect(
@@ -136,7 +139,7 @@ fun <T> ChainOfThought(
             ),
         colors = effectiveCardColors,
         // 形状对齐聊天气泡: 跟随"气泡圆角"设置
-        shape = RoundedCornerShape(settings.displaySetting.bubbleCornerRadius.dp),
+        shape = RoundedCornerShape(dsp.bubbleCornerRadius.dp),
     ) {
             Column(
                 modifier = Modifier

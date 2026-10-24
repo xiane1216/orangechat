@@ -733,7 +733,62 @@ data class DisplaySetting(
     val assistantBubbleImagePath: String = "",
     val bubbleCornerRadius: Float = 16f,
     val bubbleImageOverlayEnabled: Boolean = false, // 关=纯图片, 开=图片+主题色遮罩
+    // 深浅色颜色方案: 跟随应用深浅色状态自动切换两套自定义颜色
+    val colorSchemeMode: ColorSchemeMode = ColorSchemeMode.NONE,
+    val lightColorScheme: ColorOverrideScheme? = null,
+    val darkColorScheme: ColorOverrideScheme? = null,
 )
+
+/**
+ * 颜色方案模式:
+ * NONE = 不跟随深浅色 (爱咋换咋换, 始终使用全局单套颜色)
+ * FOLLOW_SYSTEM = 跟随应用深浅色状态, 自动使用浅色/深色方案 (方案内未设置的项回退全局颜色)
+ */
+@Serializable
+enum class ColorSchemeMode { NONE, FOLLOW_SYSTEM }
+
+/**
+ * 一套颜色方案覆盖 (颜色定义页的全部颜色项; null = 该项回退全局颜色)
+ */
+@Serializable
+data class ColorOverrideScheme(
+    val chatTextColor: Long? = null,
+    val globalTextColor: Long? = null,
+    val userBubbleColor: Long? = null,
+    val userMessageFontColor: Long? = null,
+    val assistantBubbleColor: Long? = null,
+    val thinkingBubbleColor: Long? = null,
+    val thinkingTextColor: Long? = null,
+    val chatBackgroundColor: Long? = null,
+    val primaryColor: Long? = null,
+    val inputFieldColor: Long? = null,
+)
+
+/**
+ * 把颜色方案应用到 DisplaySetting: 方案内设置了的项覆盖, 未设置(null)的项保留全局值
+ */
+fun DisplaySetting.applyColorScheme(scheme: ColorOverrideScheme): DisplaySetting = copy(
+    chatTextColor = scheme.chatTextColor ?: chatTextColor,
+    globalTextColor = scheme.globalTextColor ?: globalTextColor,
+    userBubbleColor = scheme.userBubbleColor ?: userBubbleColor,
+    userMessageFontColor = scheme.userMessageFontColor ?: userMessageFontColor,
+    assistantBubbleColor = scheme.assistantBubbleColor ?: assistantBubbleColor,
+    thinkingBubbleColor = scheme.thinkingBubbleColor ?: thinkingBubbleColor,
+    thinkingTextColor = scheme.thinkingTextColor ?: thinkingTextColor,
+    chatBackgroundColor = scheme.chatBackgroundColor ?: chatBackgroundColor,
+    primaryColor = scheme.primaryColor ?: primaryColor,
+    inputFieldColor = scheme.inputFieldColor ?: inputFieldColor,
+)
+
+/**
+ * 取当前深浅色状态下生效的 DisplaySetting (颜色自定义部分):
+ * NONE -> 原样; FOLLOW_SYSTEM -> 应用对应深浅色方案 (方案不存在则原样回退全局)
+ */
+fun DisplaySetting.effectiveColorsFor(isDarkMode: Boolean): DisplaySetting = when (colorSchemeMode) {
+    ColorSchemeMode.NONE -> this
+    ColorSchemeMode.FOLLOW_SYSTEM -> (if (isDarkMode) darkColorScheme else lightColorScheme)
+        ?.let { applyColorScheme(it) } ?: this
+}
 
 @Serializable
 data class WebDavConfig(

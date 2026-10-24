@@ -615,8 +615,10 @@ fun ChatInput(
             // Input area with optional background image (定稿: 整体胶囊形)
             // 输入框颜色: 自定义 inputFieldColor 优先 (含毛玻璃模式), 有背景图时图片优先
             // 毛玻璃生效: enableBlurEffect 或 bubbleGlassEnabled (气泡磨砂玻璃开关统一管理)
-            val glassMode = settings.displaySetting.enableBlurEffect || settings.displaySetting.bubbleGlassEnabled
-            val inputColor = settings.displaySetting.inputFieldColor?.let { it.toComposeColor() } ?: hazeTintColor
+            // 颜色读取深浅色方案生效后的值 (LocalDisplaySettings 已按方案覆盖)
+            val effectiveDisplay = LocalDisplaySettings.current
+            val glassMode = effectiveDisplay.enableBlurEffect || effectiveDisplay.bubbleGlassEnabled
+            val inputColor = effectiveDisplay.inputFieldColor?.let { it.toComposeColor() } ?: hazeTintColor
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()

@@ -75,6 +75,7 @@ import kotlinx.serialization.Serializable
 import me.rerere.highlight.Highlighter
 import me.rerere.highlight.LocalHighlighter
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.effectiveColorsFor
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
@@ -400,7 +401,8 @@ class RouteActivity : ComponentActivity() {
                 LocalNavController provides Navigator(backStack),
                 LocalSharedTransitionScope provides this,
                 LocalSettings provides settings,
-                LocalDisplaySettings provides settings.displaySetting,
+                // 颜色方案: 跟随应用深浅色状态时, 将浅色/深色方案覆盖到生效配置上
+                LocalDisplaySettings provides settings.displaySetting.effectiveColorsFor(LocalDarkMode.current),
                 LocalProviders provides settings.providers,
                 LocalMcpServers provides settings.mcpServers,
                 LocalQuickMessages provides settings.quickMessages,

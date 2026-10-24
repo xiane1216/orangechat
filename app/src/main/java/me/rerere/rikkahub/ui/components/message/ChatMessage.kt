@@ -784,7 +784,7 @@ private fun BubbleSurface(
         val hazeState = LocalHazeState.current
         val glass = displaySettings.bubbleGlassEnabled && hazeState != null && (
             settings.getCurrentAssistant().background != null ||
-                settings.displaySetting.chatBackgroundColor != null
+                displaySettings.chatBackgroundColor != null
             )
         if (glass) {
             // 磨砂模式: 用普通 Box 而非 Surface(onClick), 去掉 48dp 最小触摸尺寸撑高,

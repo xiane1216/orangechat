@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,7 +36,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.rerere.rikkahub.data.datastore.ColorOverrideScheme
+import me.rerere.rikkahub.data.datastore.ColorSchemeMode
 import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.data.datastore.applyColorScheme
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.ColorPickerDialog
@@ -49,9 +53,59 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
 
+    // 编辑目标: global=全局单套颜色; light/dark=跟随系统时的浅色/深色方案
+    var editTarget by rememberSaveable { mutableStateOf("global") }
+    val followSystem = displaySetting.colorSchemeMode == ColorSchemeMode.FOLLOW_SYSTEM
+
     fun updateDisplaySetting(setting: DisplaySetting) {
         displaySetting = setting
         vm.updateSettings(settings.copy(displaySetting = setting))
+    }
+
+    // 当前编辑基底: 方案模式下, 方案未设置的项显示全局当前值作为起点
+    val editBase = when (editTarget) {
+        "light" -> displaySetting.lightColorScheme?.let { displaySetting.applyColorScheme(it) } ?: displaySetting
+        "dark" -> displaySetting.darkColorScheme?.let { displaySetting.applyColorScheme(it) } ?: displaySetting
+        else -> displaySetting
+    }
+
+    // 编辑目标路由: 方案模式下把颜色写进对应方案 (方案外颜色项不影响全局), 全局模式直接写
+    fun updateEditBase(newBase: DisplaySetting) {
+        when (editTarget) {
+            "light" -> updateDisplaySetting(
+                displaySetting.copy(
+                    lightColorScheme = ColorOverrideScheme(
+                        chatTextColor = newBase.chatTextColor,
+                        globalTextColor = newBase.globalTextColor,
+                        userBubbleColor = newBase.userBubbleColor,
+                        userMessageFontColor = newBase.userMessageFontColor,
+                        assistantBubbleColor = newBase.assistantBubbleColor,
+                        thinkingBubbleColor = newBase.thinkingBubbleColor,
+                        thinkingTextColor = newBase.thinkingTextColor,
+                        chatBackgroundColor = newBase.chatBackgroundColor,
+                        primaryColor = newBase.primaryColor,
+                        inputFieldColor = newBase.inputFieldColor,
+                    )
+                )
+            )
+            "dark" -> updateDisplaySetting(
+                displaySetting.copy(
+                    darkColorScheme = ColorOverrideScheme(
+                        chatTextColor = newBase.chatTextColor,
+                        globalTextColor = newBase.globalTextColor,
+                        userBubbleColor = newBase.userBubbleColor,
+                        userMessageFontColor = newBase.userMessageFontColor,
+                        assistantBubbleColor = newBase.assistantBubbleColor,
+                        thinkingBubbleColor = newBase.thinkingBubbleColor,
+                        thinkingTextColor = newBase.thinkingTextColor,
+                        chatBackgroundColor = newBase.chatBackgroundColor,
+                        primaryColor = newBase.primaryColor,
+                        inputFieldColor = newBase.inputFieldColor,
+                    )
+                )
+            )
+            else -> updateDisplaySetting(newBase)
+        }
     }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -69,81 +123,81 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
 
     if (showChatTextColorPicker) {
         ColorPickerDialog(
-            initialColor = displaySetting.chatTextColor,
+            initialColor = editBase.chatTextColor,
             defaultColor = MaterialTheme.colorScheme.onSurface,
-            onConfirm = { updateDisplaySetting(displaySetting.copy(chatTextColor = it)) },
+            onConfirm = { updateEditBase(editBase.copy(chatTextColor = it)) },
             onDismiss = { showChatTextColorPicker = false }
         )
     }
     if (showGlobalTextColorPicker) {
         ColorPickerDialog(
-            initialColor = displaySetting.globalTextColor,
+            initialColor = editBase.globalTextColor,
             defaultColor = MaterialTheme.colorScheme.background,
-            onConfirm = { updateDisplaySetting(displaySetting.copy(globalTextColor = it)) },
+            onConfirm = { updateEditBase(editBase.copy(globalTextColor = it)) },
             onDismiss = { showGlobalTextColorPicker = false }
         )
     }
     if (showUserBubbleColorPicker) {
         ColorPickerDialog(
-            initialColor = displaySetting.userBubbleColor,
+            initialColor = editBase.userBubbleColor,
             defaultColor = MaterialTheme.colorScheme.secondaryContainer,
-            onConfirm = { updateDisplaySetting(displaySetting.copy(userBubbleColor = it)) },
+            onConfirm = { updateEditBase(editBase.copy(userBubbleColor = it)) },
             onDismiss = { showUserBubbleColorPicker = false }
         )
     }
     if (showUserMessageFontColorPicker) {
         ColorPickerDialog(
-            initialColor = displaySetting.userMessageFontColor,
+            initialColor = editBase.userMessageFontColor,
             defaultColor = MaterialTheme.colorScheme.onPrimary,
-            onConfirm = { updateDisplaySetting(displaySetting.copy(userMessageFontColor = it)) },
+            onConfirm = { updateEditBase(editBase.copy(userMessageFontColor = it)) },
             onDismiss = { showUserMessageFontColorPicker = false }
         )
     }
     if (showAssistantBubbleColorPicker) {
         ColorPickerDialog(
-            initialColor = displaySetting.assistantBubbleColor,
+            initialColor = editBase.assistantBubbleColor,
             defaultColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            onConfirm = { updateDisplaySetting(displaySetting.copy(assistantBubbleColor = it)) },
+            onConfirm = { updateEditBase(editBase.copy(assistantBubbleColor = it)) },
             onDismiss = { showAssistantBubbleColorPicker = false }
         )
     }
     if (showThinkingBubbleColorPicker) {
         ColorPickerDialog(
-            initialColor = displaySetting.thinkingBubbleColor,
+            initialColor = editBase.thinkingBubbleColor,
             defaultColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            onConfirm = { updateDisplaySetting(displaySetting.copy(thinkingBubbleColor = it)) },
+            onConfirm = { updateEditBase(editBase.copy(thinkingBubbleColor = it)) },
             onDismiss = { showThinkingBubbleColorPicker = false }
         )
     }
     if (showThinkingTextColorPicker) {
         ColorPickerDialog(
-            initialColor = displaySetting.thinkingTextColor,
+            initialColor = editBase.thinkingTextColor,
             defaultColor = MaterialTheme.colorScheme.secondary,
-            onConfirm = { updateDisplaySetting(displaySetting.copy(thinkingTextColor = it)) },
+            onConfirm = { updateEditBase(editBase.copy(thinkingTextColor = it)) },
             onDismiss = { showThinkingTextColorPicker = false }
         )
     }
     if (showChatBackgroundColorPicker) {
         ColorPickerDialog(
-            initialColor = displaySetting.chatBackgroundColor,
+            initialColor = editBase.chatBackgroundColor,
             defaultColor = MaterialTheme.colorScheme.background,
-            onConfirm = { updateDisplaySetting(displaySetting.copy(chatBackgroundColor = it)) },
+            onConfirm = { updateEditBase(editBase.copy(chatBackgroundColor = it)) },
             onDismiss = { showChatBackgroundColorPicker = false }
         )
     }
     if (showPrimaryColorPicker) {
         ColorPickerDialog(
-            initialColor = displaySetting.primaryColor,
+            initialColor = editBase.primaryColor,
             defaultColor = MaterialTheme.colorScheme.primary,
-            onConfirm = { updateDisplaySetting(displaySetting.copy(primaryColor = it)) },
+            onConfirm = { updateEditBase(editBase.copy(primaryColor = it)) },
             onDismiss = { showPrimaryColorPicker = false }
         )
     }
     if (showInputFieldColorPicker) {
         ColorPickerDialog(
-            initialColor = displaySetting.inputFieldColor,
+            initialColor = editBase.inputFieldColor,
             defaultColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-            onConfirm = { updateDisplaySetting(displaySetting.copy(inputFieldColor = it)) },
+            onConfirm = { updateEditBase(editBase.copy(inputFieldColor = it)) },
             onDismiss = { showInputFieldColorPicker = false }
         )
     }
@@ -168,7 +222,83 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text("颜色自定义") },
+                    title = { Text("颜色方案") },
+                ) {
+                    item(
+                        headlineContent = { Text("跟随系统深浅色") },
+                        supportingContent = { Text("手机切换深色/浅色模式时自动使用对应方案; 方案里没设置的颜色回退全局颜色") },
+                        trailingContent = {
+                            Switch(
+                                checked = followSystem,
+                                onCheckedChange = {
+                                    updateDisplaySetting(
+                                        displaySetting.copy(
+                                            colorSchemeMode = if (it) ColorSchemeMode.FOLLOW_SYSTEM else ColorSchemeMode.NONE
+                                        )
+                                    )
+                                    if (!it) editTarget = "global"
+                                }
+                            )
+                        },
+                    )
+                    if (followSystem) {
+                        item(
+                            onClick = { editTarget = "global" },
+                            headlineContent = { Text("编辑全局颜色") },
+                            supportingContent = { Text("所有模式下通用的基础颜色") },
+                            trailingContent = {
+                                if (editTarget == "global") {
+                                    Text("当前", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                }
+                            },
+                        )
+                        item(
+                            onClick = { editTarget = "light" },
+                            headlineContent = { Text("编辑浅色方案") },
+                            supportingContent = { Text("手机浅色模式时使用, 以全局颜色为起点") },
+                            trailingContent = {
+                                if (editTarget == "light") {
+                                    Text("当前", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                }
+                            },
+                        )
+                        item(
+                            onClick = { editTarget = "dark" },
+                            headlineContent = { Text("编辑深色方案") },
+                            supportingContent = { Text("手机深色模式时使用, 以全局颜色为起点") },
+                            trailingContent = {
+                                if (editTarget == "dark") {
+                                    Text("当前", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                }
+                            },
+                        )
+                        if (editTarget != "global") {
+                            item(
+                                onClick = {
+                                    when (editTarget) {
+                                        "light" -> updateDisplaySetting(displaySetting.copy(lightColorScheme = null))
+                                        "dark" -> updateDisplaySetting(displaySetting.copy(darkColorScheme = null))
+                                    }
+                                },
+                                headlineContent = { Text("清除当前方案") },
+                                supportingContent = { Text("清空正在编辑的方案, 颜色全部回退全局颜色") },
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = {
+                        Text(
+                            when (editTarget) {
+                                "light" -> "颜色自定义 (浅色方案)"
+                                "dark" -> "颜色自定义 (深色方案)"
+                                else -> "颜色自定义"
+                            }
+                        )
+                    },
                 ) {
                     item(
                         headlineContent = { Text("聊天正文颜色") },
@@ -178,13 +308,13 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                     modifier = Modifier
                                         .size(16.dp)
                                         .background(
-                                            displaySetting.chatTextColor?.let { it.toComposeColor() } ?: Color.Gray,
+                                            editBase.chatTextColor?.let { it.toComposeColor() } ?: Color.Gray,
                                             CircleShape
                                         )
                                 )
                                 TextButton(onClick = { showChatTextColorPicker = true }) { Text("自定义") }
-                                if (displaySetting.chatTextColor != null) {
-                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(chatTextColor = null)) }) { Text("重置") }
+                                if (editBase.chatTextColor != null) {
+                                    TextButton(onClick = { updateEditBase(editBase.copy(chatTextColor = null)) }) { Text("重置") }
                                 }
                             }
                         },
@@ -197,13 +327,13 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                     modifier = Modifier
                                         .size(16.dp)
                                         .background(
-                                            displaySetting.globalTextColor?.let { it.toComposeColor() } ?: Color.Gray,
+                                            editBase.globalTextColor?.let { it.toComposeColor() } ?: Color.Gray,
                                             CircleShape
                                         )
                                 )
                                 TextButton(onClick = { showGlobalTextColorPicker = true }) { Text("自定义") }
-                                if (displaySetting.globalTextColor != null) {
-                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(globalTextColor = null)) }) { Text("重置") }
+                                if (editBase.globalTextColor != null) {
+                                    TextButton(onClick = { updateEditBase(editBase.copy(globalTextColor = null)) }) { Text("重置") }
                                 }
                             }
                         },
@@ -217,13 +347,13 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                     modifier = Modifier
                                         .size(16.dp)
                                         .background(
-                                            displaySetting.userBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.secondaryContainer,
+                                            editBase.userBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.secondaryContainer,
                                             CircleShape
                                         )
                                 )
                                 TextButton(onClick = { showUserBubbleColorPicker = true }) { Text("自定义") }
-                                if (displaySetting.userBubbleColor != null) {
-                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(userBubbleColor = null)) }) { Text("重置") }
+                                if (editBase.userBubbleColor != null) {
+                                    TextButton(onClick = { updateEditBase(editBase.copy(userBubbleColor = null)) }) { Text("重置") }
                                 }
                             }
                         },
@@ -237,13 +367,13 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                     modifier = Modifier
                                         .size(16.dp)
                                         .background(
-                                            displaySetting.userMessageFontColor?.let { it.toComposeColor() } ?: Color.Gray,
+                                            editBase.userMessageFontColor?.let { it.toComposeColor() } ?: Color.Gray,
                                             CircleShape
                                         )
                                 )
                                 TextButton(onClick = { showUserMessageFontColorPicker = true }) { Text("自定义") }
-                                if (displaySetting.userMessageFontColor != null) {
-                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(userMessageFontColor = null)) }) { Text("重置") }
+                                if (editBase.userMessageFontColor != null) {
+                                    TextButton(onClick = { updateEditBase(editBase.copy(userMessageFontColor = null)) }) { Text("重置") }
                                 }
                             }
                         },
@@ -257,13 +387,13 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                     modifier = Modifier
                                         .size(16.dp)
                                         .background(
-                                            displaySetting.assistantBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            editBase.assistantBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.surfaceContainerHigh,
                                             CircleShape
                                         )
                                 )
                                 TextButton(onClick = { showAssistantBubbleColorPicker = true }) { Text("自定义") }
-                                if (displaySetting.assistantBubbleColor != null) {
-                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(assistantBubbleColor = null)) }) { Text("重置") }
+                                if (editBase.assistantBubbleColor != null) {
+                                    TextButton(onClick = { updateEditBase(editBase.copy(assistantBubbleColor = null)) }) { Text("重置") }
                                 }
                             }
                         },
@@ -276,13 +406,13 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                     modifier = Modifier
                                         .size(16.dp)
                                         .background(
-                                            displaySetting.thinkingBubbleColor?.let { it.toComposeColor() } ?: Color.Gray,
+                                            editBase.thinkingBubbleColor?.let { it.toComposeColor() } ?: Color.Gray,
                                             CircleShape
                                         )
                                 )
                                 TextButton(onClick = { showThinkingBubbleColorPicker = true }) { Text("自定义") }
-                                if (displaySetting.thinkingBubbleColor != null) {
-                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(thinkingBubbleColor = null)) }) { Text("重置") }
+                                if (editBase.thinkingBubbleColor != null) {
+                                    TextButton(onClick = { updateEditBase(editBase.copy(thinkingBubbleColor = null)) }) { Text("重置") }
                                 }
                             }
                         },
@@ -296,13 +426,13 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                     modifier = Modifier
                                         .size(16.dp)
                                         .background(
-                                            displaySetting.thinkingTextColor?.let { it.toComposeColor() } ?: Color.Gray,
+                                            editBase.thinkingTextColor?.let { it.toComposeColor() } ?: Color.Gray,
                                             CircleShape
                                         )
                                 )
                                 TextButton(onClick = { showThinkingTextColorPicker = true }) { Text("自定义") }
-                                if (displaySetting.thinkingTextColor != null) {
-                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(thinkingTextColor = null)) }) { Text("重置") }
+                                if (editBase.thinkingTextColor != null) {
+                                    TextButton(onClick = { updateEditBase(editBase.copy(thinkingTextColor = null)) }) { Text("重置") }
                                 }
                             }
                         },
@@ -328,13 +458,13 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                     modifier = Modifier
                                         .size(16.dp)
                                         .background(
-                                            displaySetting.chatBackgroundColor?.let { it.toComposeColor() } ?: Color.Gray,
+                                            editBase.chatBackgroundColor?.let { it.toComposeColor() } ?: Color.Gray,
                                             CircleShape
                                         )
                                 )
                                 TextButton(onClick = { showChatBackgroundColorPicker = true }) { Text("自定义") }
-                                if (displaySetting.chatBackgroundColor != null) {
-                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(chatBackgroundColor = null)) }) { Text("重置") }
+                                if (editBase.chatBackgroundColor != null) {
+                                    TextButton(onClick = { updateEditBase(editBase.copy(chatBackgroundColor = null)) }) { Text("重置") }
                                 }
                             }
                         },
@@ -347,13 +477,13 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                     modifier = Modifier
                                         .size(16.dp)
                                         .background(
-                                            displaySetting.primaryColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.primary,
+                                            editBase.primaryColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.primary,
                                             CircleShape
                                         )
                                 )
                                 TextButton(onClick = { showPrimaryColorPicker = true }) { Text("自定义") }
-                                if (displaySetting.primaryColor != null) {
-                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(primaryColor = null)) }) { Text("重置") }
+                                if (editBase.primaryColor != null) {
+                                    TextButton(onClick = { updateEditBase(editBase.copy(primaryColor = null)) }) { Text("重置") }
                                 }
                             }
                         },
@@ -367,13 +497,13 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                     modifier = Modifier
                                         .size(16.dp)
                                         .background(
-                                            displaySetting.inputFieldColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.surfaceContainerLowest,
+                                            editBase.inputFieldColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.surfaceContainerLowest,
                                             CircleShape
                                         )
                                 )
                                 TextButton(onClick = { showInputFieldColorPicker = true }) { Text("自定义") }
-                                if (displaySetting.inputFieldColor != null) {
-                                    TextButton(onClick = { updateDisplaySetting(displaySetting.copy(inputFieldColor = null)) }) { Text("重置") }
+                                if (editBase.inputFieldColor != null) {
+                                    TextButton(onClick = { updateEditBase(editBase.copy(inputFieldColor = null)) }) { Text("重置") }
                                 }
                             }
                         },

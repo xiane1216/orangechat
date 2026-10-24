@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import kotlinx.serialization.Serializable
+import me.rerere.rikkahub.data.datastore.effectiveColorsFor
 import me.rerere.rikkahub.ui.components.ui.toComposeColor
 import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
 import me.rerere.rikkahub.ui.hooks.rememberColorMode
@@ -84,15 +85,16 @@ fun RikkahubTheme(
     }
     val extendColors = if (darkTheme) ExtendDarkColors else ExtendLightColors
 
-    // 颜色自定义覆盖
+    // 颜色自定义覆盖 (深浅色颜色方案生效后的结果)
+    val effectiveDisplay = settings.displaySetting.effectiveColorsFor(darkTheme)
     val finalColorScheme = remember(
         colorSchemeConverted,
-        settings.displaySetting.primaryColor,
-        settings.displaySetting.globalTextColor,
+        effectiveDisplay.primaryColor,
+        effectiveDisplay.globalTextColor,
         settings.themeId,
     ) {
         var scheme = colorSchemeConverted
-        settings.displaySetting.primaryColor?.let { pc ->
+        effectiveDisplay.primaryColor?.let { pc ->
             val primaryColor = pc.toComposeColor()
             val luminance = 0.299f * primaryColor.red + 0.587f * primaryColor.green + 0.114f * primaryColor.blue
             val onPrimary = if (luminance > 0.5f) Color.Black else Color.White
@@ -101,7 +103,7 @@ fun RikkahubTheme(
                 onPrimary = onPrimary,
             )
         }
-        settings.displaySetting.globalTextColor?.let { gtc ->
+        effectiveDisplay.globalTextColor?.let { gtc ->
             val textColor = gtc.toComposeColor()
             scheme = scheme.copy(
                 onBackground = textColor,
