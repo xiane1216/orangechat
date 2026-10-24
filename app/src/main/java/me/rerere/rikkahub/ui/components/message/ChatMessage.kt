@@ -786,27 +786,37 @@ private fun BubbleSurface(
             settings.getCurrentAssistant().background != null ||
                 settings.displaySetting.chatBackgroundColor != null
             )
-        Surface(
-            modifier = Modifier
-                .animateContentSize()
-                // 先裁圆角再模糊: 磨砂层不会溢出气泡圆角
-                .clip(RoundedCornerShape(cornerRadius))
-                .then(
-                    if (glass) Modifier.hazeEffect(
-                        state = hazeState,
-                        // tint = 气泡色 × 用户透明度: 模糊透出背景图颜色, 不发白/不发黑
-                        style = HazeStyle(
-                            backgroundColor = Color.Transparent,
-                            tints = listOf(HazeTint(color.copy(alpha = bubbleAlpha))),
+        if (glass) {
+            // 磨砂模式: 用普通 Box 而非 Surface(onClick), 去掉 48dp 最小触摸尺寸撑高,
+            // 气泡物理上紧贴内容, 大小和关闭磨砂时观感一致
+            Box(
+                modifier = Modifier
+                    .animateContentSize()
+                    // 先裁圆角再模糊: 磨砂层不会溢出气泡圆角
+                    .clip(RoundedCornerShape(cornerRadius))
+                    .then(
+                        Modifier.hazeEffect(
+                            state = hazeState!!,
+                            // tint = 气泡色 × 用户透明度: 模糊透出背景图颜色, 不发白/不发黑
+                            style = HazeStyle(
+                                backgroundColor = Color.Transparent,
+                                tints = listOf(HazeTint(color.copy(alpha = bubbleAlpha))),
+                            )
                         )
-                    ) else Modifier
-                ),
-            shape = RoundedCornerShape(cornerRadius),
-            // 磨砂模式下底色透明, 由磨砂层提供气泡色调 (透明度设置继续联动)
-            color = if (glass) Color.Transparent else color.copy(alpha = bubbleAlpha),
-            onClick = onClick ?: {},
-        ) {
-            Column(modifier = Modifier.padding(8.dp)) { content() }
+                    )
+                    .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) { content() }
+            }
+        } else {
+            Surface(
+                modifier = Modifier.animateContentSize(),
+                shape = RoundedCornerShape(cornerRadius),
+                color = color.copy(alpha = bubbleAlpha),
+                onClick = onClick ?: {},
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) { content() }
+            }
         }
     }
 }
