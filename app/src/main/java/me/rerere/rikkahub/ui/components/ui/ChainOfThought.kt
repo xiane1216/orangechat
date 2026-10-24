@@ -56,6 +56,10 @@ import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.ui.context.LocalHazeState
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.materials.HazeMaterials
 
 /**
  * 以时间线/步骤卡片的形式展示一组思考过程。
@@ -91,6 +95,7 @@ fun <T> ChainOfThought(
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
 
     val thinkingBubbleColor = settings.displaySetting.thinkingBubbleColor?.let { it.toComposeColor() }
+    val hazeState = LocalHazeState.current
     val effectiveCardColors = CardDefaults.cardColors(
         containerColor = (thinkingBubbleColor ?: cardColors.containerColor).copy(alpha = thinkingAlpha),
         contentColor = cardColors.contentColor,
@@ -99,13 +104,27 @@ fun <T> ChainOfThought(
     )
 
     Card(
-        modifier = modifier,
+        modifier = modifier.then(
+            // 气泡磨砂玻璃: 模糊透出聊天背景颜色 (iMessage 风格)
+            // tint 用思考链气泡色本身, 不发白/发黑
+            if (settings.displaySetting.bubbleGlassEnabled && hazeState != null && (
+                settings.getCurrentAssistant().background != null ||
+                    settings.displaySetting.chatBackgroundColor != null
+                )
+            ) {
+                Modifier.hazeEffect(
+                    state = hazeState,
+                    style = HazeMaterials.thin(containerColor = thinkingBubbleColor ?: cardColors.containerColor)
+                )
+            } else Modifier
+        ),
         colors = effectiveCardColors,
-        shape = RoundedCornerShape(16.dp),
+        // 形状对齐聊天气泡: 跟随"气泡圆角"设置
+        shape = RoundedCornerShape(settings.displaySetting.bubbleCornerRadius.dp),
     ) {
             Column(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .padding(horizontal = 12.dp, vertical = 2.dp)
                     .animateContentSize(
                         animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
                     ),

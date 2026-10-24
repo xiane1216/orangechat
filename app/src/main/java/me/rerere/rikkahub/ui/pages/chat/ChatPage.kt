@@ -80,7 +80,9 @@ import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.VoiceCallService
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalHazeState
 import me.rerere.rikkahub.ui.context.LocalToaster
+import androidx.compose.runtime.CompositionLocalProvider
 import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
@@ -278,7 +280,9 @@ private fun ChatPageContent(
         color = MaterialTheme.colorScheme.background,
         modifier = Modifier.fillMaxSize()
     ) {
-        AssistantBackground(setting = setting)
+        AssistantBackground(setting = setting, hazeState = hazeState)
+        // 气泡磨砂玻璃: 提供全局 haze 状态给消息气泡/思考链卡片
+        CompositionLocalProvider(LocalHazeState provides hazeState) {
         Scaffold(
             topBar = {
                 TopBar(
@@ -483,6 +487,7 @@ private fun ChatPageContent(
                     vm.saveConversationAsync()
                 },
             )
+        }
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 橘瓣 OrangeChat
  * 衍生自 RikkaHub (https://github.com/rikkahub/rikkahub)，原作者 RE
  * 本项目基于 GNU AGPL v3 开源，详见根目录 LICENSE 文件
@@ -14,14 +14,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.ui.toComposeColor
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 
 @Composable
-fun AssistantBackground(setting: Settings) {
+fun AssistantBackground(setting: Settings, hazeState: HazeState? = null) {
     val assistant = setting.getCurrentAssistant()
     val chatBackgroundColor = setting.displaySetting.chatBackgroundColor?.let { it.toComposeColor() }
+    // 注册为 haze 模糊源: 气泡磨砂玻璃需要从背景图/背景色取色
+    val sourceModifier = if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier
 
     when {
         assistant.background != null -> {
@@ -36,6 +40,7 @@ fun AssistantBackground(setting: Settings) {
                 modifier = Modifier
                     .fillMaxSize()
                     .alpha(backgroundOpacity)
+                    .then(sourceModifier)
             )
         }
 
@@ -45,6 +50,7 @@ fun AssistantBackground(setting: Settings) {
                 modifier = Modifier
                     .fillMaxSize()
                     .background(chatBackgroundColor)
+                    .then(sourceModifier)
             )
         }
     }

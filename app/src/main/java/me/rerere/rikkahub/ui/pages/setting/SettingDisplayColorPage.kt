@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -304,6 +305,18 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                     TextButton(onClick = { updateDisplaySetting(displaySetting.copy(thinkingTextColor = null)) }) { Text("重置") }
                                 }
                             }
+                        },
+                    )
+                    item(
+                        headlineContent = { Text("气泡磨砂玻璃") },
+                        supportingContent = { Text("iMessage 风格: 气泡/思考链/输入框模糊透出背景颜色 (需背景图或背景色, Android 12+)") },
+                        trailingContent = {
+                            Switch(
+                                checked = displaySetting.bubbleGlassEnabled,
+                                onCheckedChange = {
+                                    updateDisplaySetting(displaySetting.copy(bubbleGlassEnabled = it))
+                                }
+                            )
                         },
                     )
                     item(

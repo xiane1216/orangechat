@@ -110,6 +110,11 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.components.ui.toComposeColor
 import me.rerere.rikkahub.ui.context.LocalDisplaySettings
+import me.rerere.rikkahub.ui.context.LocalHazeState
+import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.materials.HazeMaterials
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import androidx.compose.ui.text.font.Font
@@ -771,8 +776,25 @@ private fun BubbleSurface(
             Column(modifier = Modifier.padding(8.dp)) { content() }
         }
     } else {
+        // 气泡磨砂玻璃 (iMessage 风格): 模糊透出背景颜色, 不发白不发黑
+        // 生效条件: 开关开启 + 存在聊天背景图/背景色 + 系统支持
+        val settings = LocalSettings.current
+        val displaySettings = LocalDisplaySettings.current
+        val hazeState = LocalHazeState.current
+        val glass = displaySettings.bubbleGlassEnabled && hazeState != null && (
+            settings.getCurrentAssistant().background != null ||
+                settings.displaySetting.chatBackgroundColor != null
+            )
         Surface(
-            modifier = Modifier.animateContentSize(),
+            modifier = Modifier
+                .animateContentSize()
+                .then(
+                    if (glass) Modifier.hazeEffect(
+                        state = hazeState,
+                        // tint 用气泡色本身: 磨砂层带气泡色调, 只透背景颜色, 不会发白/发黑
+                        style = HazeMaterials.thin(containerColor = color)
+                    ) else Modifier
+                ),
             shape = RoundedCornerShape(cornerRadius),
             color = color.copy(alpha = bubbleAlpha),
             onClick = onClick ?: {},

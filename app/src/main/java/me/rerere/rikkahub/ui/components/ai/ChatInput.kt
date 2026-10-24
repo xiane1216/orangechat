@@ -514,7 +514,7 @@ fun ChatInput(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(20.dp))
                             .then(
-                                if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
+                                if (settings.displaySetting.enableBlurEffect || settings.displaySetting.bubbleGlassEnabled) Modifier.hazeEffect(
                                     state = hazeState,
                                     style = HazeMaterials.ultraThin()
                                 )
@@ -522,7 +522,7 @@ fun ChatInput(
                             ),
                         shape = RoundedCornerShape(20.dp),
                         tonalElevation = 0.dp,
-                        color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
+                        color = if (settings.displaySetting.enableBlurEffect || settings.displaySetting.bubbleGlassEnabled) Color.Transparent else hazeTintColor,
                     ) {
                         Column {
                             // 定稿 UI: 加号面板分区 (模型 / 搜索与思考 / 附件)
@@ -614,13 +614,15 @@ fun ChatInput(
 
             // Input area with optional background image (定稿: 整体胶囊形)
             // 输入框颜色: 自定义 inputFieldColor 优先 (含毛玻璃模式), 有背景图时图片优先
+            // 毛玻璃生效: enableBlurEffect 或 bubbleGlassEnabled (气泡磨砂玻璃开关统一管理)
+            val glassMode = settings.displaySetting.enableBlurEffect || settings.displaySetting.bubbleGlassEnabled
             val inputColor = settings.displaySetting.inputFieldColor?.let { it.toComposeColor() } ?: hazeTintColor
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(26.dp))
                     .then(
-                        if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
+                        if (glassMode) Modifier.hazeEffect(
                             state = hazeState,
                             style = HazeMaterials.ultraThin(containerColor = inputColor)
                         )
@@ -630,7 +632,7 @@ fun ChatInput(
                 tonalElevation = 0.dp,
                 // When background image is set, make surface transparent so image is visible;
                 // blur mode: surface transparent, color tint comes from haze layer
-                color = if (inputBgBitmap != null || settings.displaySetting.enableBlurEffect) {
+                color = if (inputBgBitmap != null || glassMode) {
                     Color.Transparent
                 } else {
                     inputColor

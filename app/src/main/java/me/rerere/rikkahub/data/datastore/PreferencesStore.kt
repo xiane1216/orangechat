@@ -689,6 +689,9 @@ data class DisplaySetting(
     val enableAutoScroll: Boolean = true,
     val enableLatexRendering: Boolean = true,
     val enableBlurEffect: Boolean = false,
+    // 气泡磨砂玻璃 (iMessage 风格): 聊天背景为图片/颜色时, 气泡模糊透出背景颜色而非直接透明
+    // 同时作用于 用户气泡/AI气泡/思考链卡片/输入框, 低版本系统自动回退为普通透明
+    val bubbleGlassEnabled: Boolean = false,
     val chatFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
     val enableVolumeKeyScroll: Boolean = false,
     val volumeKeyScrollRatio: Float = 1.0f,
