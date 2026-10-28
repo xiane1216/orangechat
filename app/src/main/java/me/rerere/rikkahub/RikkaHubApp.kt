@@ -38,6 +38,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.service.DailySummaryService
 import me.rerere.rikkahub.data.service.DeviceEventAiTriggerService
 import me.rerere.rikkahub.data.service.DeviceEventTrackingService
+import me.rerere.rikkahub.data.service.HeartbeatService
 import me.rerere.rikkahub.data.service.ProactiveMessageService
 import me.rerere.rikkahub.data.service.SupabaseSyncService
 import me.rerere.rikkahub.service.ChatService
@@ -127,6 +128,9 @@ class RikkaHubApp : Application() {
         // Reschedule proactive message alarm if enabled
         rescheduleProactiveMessageIfEnabled()
 
+        // Reschedule heartbeat if enabled (WorkManager 任务会被 force-stop 取消, 启动时必须补排)
+        rescheduleHeartbeatIfEnabled()
+
         // Reschedule Supabase sync alarm if enabled
         rescheduleSupabaseSyncIfEnabled()
 
@@ -199,6 +203,20 @@ class RikkaHubApp : Application() {
                 }
             }.onFailure {
                 Log.e(TAG, "rescheduleProactiveMessageIfEnabled failed", it)
+            }
+        }
+    }
+
+    private fun rescheduleHeartbeatIfEnabled() {
+        get<AppScope>().launch {
+            runCatching {
+                val settings = get<SettingsStore>().settingsFlowRaw.first()
+                if (settings.heartbeatSetting.enabled) {
+                    HeartbeatService.scheduleNext(this@RikkaHubApp, settings.heartbeatSetting)
+                    Log.i(TAG, "Rescheduled heartbeat on app start")
+                }
+            }.onFailure {
+                Log.e(TAG, "rescheduleHeartbeatIfEnabled failed", it)
             }
         }
     }
