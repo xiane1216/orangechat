@@ -32,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -50,6 +51,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.compose.ui.util.fastForEach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
@@ -263,6 +265,31 @@ private fun AssistantMemoryContent(
                     )
                 }
             )
+            if (assistant.enableTimeReminder) {
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                    ) {
+                        Text(
+                            text = "提醒间隔：间隔超过 ${assistant.timeReminderGapMinutes} 分钟时注入",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Slider(
+                            value = assistant.timeReminderGapMinutes.coerceIn(5, 720).toFloat(),
+                            onValueChange = {
+                                onUpdateAssistant(
+                                    assistant.copy(
+                                        timeReminderGapMinutes = it.roundToInt()
+                                    )
+                                )
+                            },
+                            valueRange = 5f..720f,
+                            steps = 0,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
             item(
                 headlineContent = { Text("外置记忆库") },
                 supportingContent = {

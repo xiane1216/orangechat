@@ -1145,7 +1145,7 @@
   <string name="video">Video</string>
   <string name="web_search_disabled">Web search disabled</string>
   <string name="web_search_enabled">Web search enabled</string>
-  <string name="keep_alive_notification_title">橘瓣</string>
+  <string name="keep_alive_notification_title">Rely</string>
   <string name="keep_alive_notification_content">保持连接中</string>
   <string name="keep_alive_channel_name">后台保活</string>
   <string name="keep_alive_channel_desc">用于维持应用后台运行，确保定时消息等功能稳定工作</string>
