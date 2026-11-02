@@ -730,7 +730,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                                 }
                             ).let(this::addAll)
                         }
-                        add(buildWriteFilesTool(conversationId))
+                        add(buildWriteFilesTool(conversationId.toString()))
                         addAll(gi.tools)
                     }
                     heartbeatTools = toolsInternal
