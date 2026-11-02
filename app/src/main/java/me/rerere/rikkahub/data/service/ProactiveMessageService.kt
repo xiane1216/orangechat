@@ -45,6 +45,9 @@ import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
+import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.ai.tools.buildMemoryTools
+import me.rerere.rikkahub.data.ai.tools.buildWriteFilesTool
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
 import me.rerere.rikkahub.data.ai.transformers.PromptInjectionTransformer
 import me.rerere.rikkahub.data.ai.transformers.PlaceholderTransformer
@@ -365,10 +368,6 @@ class ProactiveMessageService : KoinComponent {
     }
 
 
-    suspend fun getLastMessageTimeMs(): Long {
-        return try { getLastMessageTime()?.toEpochMilliseconds() ?: 0L } catch (e: Exception) { 0L }
-    }
-
     /**
      * 获取用户最后一条消息的时间戳 (毫秒).
      * 用于心跳触发时判断: 用户是否真的闲置了 minIntervalMinutes.
@@ -455,6 +454,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
     private val pluginToolProvider: PluginToolProvider by inject()
     private val json: Json by inject()
     private val chatService: ChatService by inject()
+    private val generationHandler: GenerationHandler by inject()
     private val proactiveMessageService = ProactiveMessageService()
 
     companion object {
@@ -626,7 +626,10 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                 }
 
                 // 构建上下文
-                val idleMinutes = runCatching { val last = proactiveMessageService.getLastMessageTimeMs(); if (last > 0) ((System.currentTimeMillis() - last) / 60000L).toInt() else Int.MAX_VALUE }.getOrDefault(Int.MAX_VALUE)
+                // 闲置时长从"宝宝最后一条消息"起算（不能用 getLastMessageTimeMs：
+                // AI 自己发的心跳/主动消息会把计时器重置，导致连续触发时
+                // "X 分钟没有回复"永远停在间隔值、不再增长）
+                val idleMinutes = runCatching { val last = proactiveMessageService.getLastUserMessageTimeMs(); if (last > 0) ((System.currentTimeMillis() - last) / 60000L).toInt() else Int.MAX_VALUE }.getOrDefault(Int.MAX_VALUE)
                 // 展示用闲置时长: 无记录(MAX_VALUE)时显示"很久", 避免出现 "2147483647 分钟" 这种荒谬输出
                 val idleMinutesText = if (idleMinutes < 0 || idleMinutes >= Int.MAX_VALUE) "很久" else "$idleMinutes 分钟"
 
@@ -650,17 +653,13 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                     } ?: emptyList()
                 )
 
-                // 构建系统提示词 (心跳: 纯静态前缀; 主动消息: 含动态数据)
-                val systemPrompt = if (isHeartbeat) {
-                    buildHeartbeatSystemPrompt(assistant, settings)
-                } else {
-                    buildSystemPrompt(assistant, settings, idleMinutesText, isFromDeviceEvent, if (isFromDeviceEvent) deviceEventContext else contextStr)
-                }
-
-                // user message: 心跳只给纯事实 (时间+闲置时长), 主动消息给指令
+                // user message: 心跳只给纯事实 (时间+闲置时长+心跳规则), 主动消息给指令
                 val currentTimeStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
                     .format(java.util.Date())
                 val dynamicContext = if (isFromDeviceEvent) deviceEventContext else contextStr
+                // 连续心跳感知: 历史最后一条是 AI 自己发的消息（主动发了她也没回）时，显式告知模型
+                val heartbeatSelfUnanswered = isHeartbeat &&
+                    historyMessages.lastOrNull()?.role == MessageRole.ASSISTANT
                 val userMessage = UIMessage(
                     role = MessageRole.USER,
                     parts = listOf(UIMessagePart.Text(
@@ -672,6 +671,19 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                                     appendLine()
                                     appendLine(dynamicContext)
                                 }
+                                // 心跳规则（从原 buildHeartbeatSystemPrompt 移到末尾动态区：
+                                // system 必须与正常聊天逐字节一致，provider 前缀缓存才能命中）
+                                appendLine()
+                                appendLine("## 心跳")
+                                appendLine("这是闲置触发的心跳，你正在和宝宝聊天，宝宝还没有回复你。")
+                                appendLine("你可以根据当前的情况自由决定怎么做——可以调用工具、可以说话、也可以安静等待。")
+                                appendLine("如果觉得现在没什么好说的，回复 [PASS] 即可。")
+                                appendLine("不要复述上一轮说过的话。")
+                                appendLine("如果宝宝说了晚安，你可以查岗一次，之后到睡醒前不再打扰。")
+                                appendLine("你可以在回复末尾追加 [JUMP] 标记（单独一行）来把聊天界面拉到用户屏幕最前面。[JUMP] 不会展示给用户。")
+                                if (heartbeatSelfUnanswered) {
+                                    appendLine("（注意：你之前主动发出去的消息，宝宝也一直没有回复。）")
+                                }
                             }
                             isFromDeviceEvent -> "请根据以上用户动向决定是否发消息。没什么好说的就回复 [PASS]。"
                             else -> "请根据以上上下文决定是否发消息。没什么好说的就回复 [PASS] 即可，不要强行找话题。"
@@ -679,34 +691,112 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                     ))
                 )
 
-                // 应用输入转换器
-                // 注意: 转换器可能会往列表里插入额外消息 (如 TimeReminderTransformer 会在
-                // 首条 USER 消息前插入 <time_reminder>), 因此不能用 .first() 取结果 —
-                // 那样取到的是插入的提醒消息, 真正的触发消息反而被丢掉 (旧 bug).
-                val processedMessages = listOf(userMessage).transforms(
-                    transformers = inputTransformers + templateTransformer,
-                    context = this@ProactiveMessageTriggerService,
-                    model = model,
-                    assistant = assistant,
-                    settings = settings
-                )
-                val processedUserMessage =
-                    processedMessages.firstOrNull { it.id == userMessage.id } ?: userMessage
-                val injectedExtraMessages = processedMessages.filter { it.id != userMessage.id }
-
-                // 组合完整消息列表：System + History + (转换器注入的额外消息) + User Context
-                // 合并相邻同角色消息（包括 history 末尾与合成 User 消息之间可能出现的 USER-USER 相邻），避免 400
-                val messages = mergeAdjacentSameRoleMessages(
-                    buildList {
-                        add(UIMessage(
-                            role = MessageRole.SYSTEM,
-                            parts = listOf(UIMessagePart.Text(systemPrompt))
-                        ))
-                        addAll(historyMessages)
-                        addAll(injectedExtraMessages)
-                        add(processedUserMessage)
+                // 系统提示词与消息装配:
+                // - 心跳: 与正常聊天完全同构（同系统提示构造 / 同工具列表 / 同记忆 / 同转换器 /
+                //   同历史裁剪，全部对齐 GenerationHandler）——这是 provider 端前缀缓存命中的前提，
+                //   心跳 system 与聊天请求差一个字节都会导致整条请求全量 miss。
+                // - 主动消息: 原有装配（系统提示含动态触发上下文，本就与聊天不同构）。
+                var processedUserMessage: UIMessage = userMessage
+                var injectedExtraMessages: List<UIMessage> = emptyList()
+                var heartbeatTools: List<Tool> = emptyList()
+                val systemPrompt: String
+                val messages: List<UIMessage>
+                if (isHeartbeat) {
+                    val gi = chatService.buildChatAlignedInputs(
+                        conversation = conversation,
+                        assistant = assistant,
+                        settings = settings,
+                        conversationId = conversationId,
+                    )
+                    // GenerationHandler.generateText 会在内部追加记忆工具 + 写文件工具，
+                    // 它们的 prompt 会渲染进系统提示词，这里必须保持一致
+                    val toolsInternal = buildList {
+                        if (assistant.enableMemory) {
+                            val memoryAssistantId = if (assistant.useGlobalMemory) {
+                                MemoryRepository.GLOBAL_MEMORY_ID
+                            } else {
+                                assistant.id.toString()
+                            }
+                            buildMemoryTools(
+                                json = json,
+                                onCreation = { content ->
+                                    memoryRepository.addMemory(memoryAssistantId, content)
+                                },
+                                onUpdate = { id, content ->
+                                    memoryRepository.updateContent(id, content)
+                                },
+                                onDelete = { id ->
+                                    memoryRepository.deleteMemory(id)
+                                }
+                            ).let(this::addAll)
+                        }
+                        add(buildWriteFilesTool(conversationId))
+                        addAll(gi.tools)
                     }
-                )
+                    heartbeatTools = toolsInternal
+                    systemPrompt = generationHandler.buildChatSystemPrompt(
+                        assistant = assistant,
+                        settings = settings,
+                        model = model,
+                        // 传真实历史（不含合成心跳消息）：外置记忆召回用它最后一条 USER 消息
+                        // 做检索 query，样板心跳文字只会召回噪音；召回内容在动态区，不影响前缀缓存
+                        messages = historyMessages,
+                        tools = toolsInternal,
+                        memories = gi.memories,
+                        pluginPromptInjections = gi.pluginPromptInjections,
+                        conversationSystemPrompt = gi.conversationSystemPrompt,
+                        workspaceCwd = gi.workspaceCwd,
+                    )
+                    messages = mergeAdjacentSameRoleMessages(
+                        buildList {
+                            add(UIMessage.system(prompt = systemPrompt))
+                            addAll(
+                                (historyMessages + userMessage)
+                                    .limitContext(assistant.contextMessageSize)
+                                    .limitReasoningRetention(assistant.reasoningRetentionRounds)
+                            )
+                        }.transforms(
+                            transformers = gi.inputTransformers,
+                            context = this@ProactiveMessageTriggerService,
+                            model = model,
+                            assistant = assistant,
+                            settings = settings,
+                            workspaceCwd = gi.workspaceCwd
+                        )
+                    )
+                } else {
+                    // 构建系统提示词 (主动消息: 含动态数据)
+                    systemPrompt = buildSystemPrompt(assistant, settings, idleMinutesText, isFromDeviceEvent, if (isFromDeviceEvent) deviceEventContext else contextStr)
+
+                    // 应用输入转换器
+                    // 注意: 转换器可能会往列表里插入额外消息 (如 TimeReminderTransformer 会在
+                    // 首条 USER 消息前插入 <time_reminder>), 因此不能用 .first() 取结果 —
+                    // 那样取到的是插入的提醒消息, 真正的触发消息反而被丢掉 (旧 bug).
+                    val processedMessages = listOf(userMessage).transforms(
+                        transformers = inputTransformers + templateTransformer,
+                        context = this@ProactiveMessageTriggerService,
+                        model = model,
+                        assistant = assistant,
+                        settings = settings
+                    )
+                    processedUserMessage =
+                        processedMessages.firstOrNull { it.id == userMessage.id } ?: userMessage
+                    injectedExtraMessages = processedMessages.filter { it.id != userMessage.id }
+
+                    // 组合完整消息列表：System + History + (转换器注入的额外消息) + User Context
+                    // 合并相邻同角色消息（包括 history 末尾与合成 User 消息之间可能出现的 USER-USER 相邻），避免 400
+                    messages = mergeAdjacentSameRoleMessages(
+                        buildList {
+                            add(UIMessage(
+                                role = MessageRole.SYSTEM,
+                                parts = listOf(UIMessagePart.Text(systemPrompt))
+                            ))
+                            addAll(historyMessages)
+                            addAll(injectedExtraMessages)
+                            add(processedUserMessage)
+                        }
+                    )
+                }
 
                 // 直接调用 AI API 生成消息
                 val providerSetting = model.findProvider(settings.providers)
@@ -720,7 +810,8 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                 val providerImpl = providerManager.getProviderByType(providerSetting)
 
                 // 构建工具列表（与 ChatService 保持一致）
-                val tools = buildTools(settings, assistant, model)
+                // 心跳: 用同构装配段里构建好的工具列表（含记忆工具+写文件工具），保证与聊天请求一致
+                val tools = if (isHeartbeat) heartbeatTools else buildTools(settings, assistant, model)
 
                 // 主动消息场景：支持工具调用，但限制最大步数
                 // temperature 不强制默认 0.8f，保持与 GenerationHandler 一致（assistant.temperature 为 null 时不传），
@@ -1041,51 +1132,6 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
                     appendLine(deviceEventContext)
                 }
             }
-        }
-    }
-
-    /**
-     * 心跳专用系统提示词 (纯静态, 不含动态数据, 保证 cache 命中).
-     *
-     * 只给规则, 不给行为举例 — AI 根据自己的人设和心情自由决定怎么做.
-     * 动态信息 (时间/闲置时长/上下文) 放在 user message 里.
-     */
-    private suspend fun buildHeartbeatSystemPrompt(
-        assistant: Assistant,
-        settings: Settings
-    ): String {
-        return buildString {
-            val effectiveSystemPrompt = assistant.systemPrompt
-            if (effectiveSystemPrompt.isNotBlank()) {
-                append(effectiveSystemPrompt)
-            }
-
-            if (assistant.enableMemory) {
-                val memories = if (assistant.useGlobalMemory) {
-                    memoryRepository.getGlobalMemories()
-                } else {
-                    memoryRepository.getMemoriesOfAssistant(assistant.id.toString())
-                }
-                if (memories.isNotEmpty()) {
-                    appendLine()
-                    appendLine()
-                    appendLine("## 记忆")
-                    memories.forEach { memory ->
-                        appendLine("- ${memory.content}")
-                    }
-                }
-            }
-
-            // 心跳规则: 只给自由度, 不举例行为
-            appendLine()
-            appendLine()
-            appendLine("## 规则")
-            appendLine("你正在和宝宝聊天，宝宝还没有回复你。")
-            appendLine("你可以根据当前的情况自由决定怎么做——可以调用工具、可以说话、也可以安静等待。")
-            appendLine("如果觉得现在没什么好说的，回复 [PASS] 即可。")
-            appendLine("不要复述上一轮说过的话。")
-            appendLine("如果宝宝说了晚安，你可以查岗一次，之后到睡醒前不再打扰。")
-            appendLine("你可以在回复末尾追加 [JUMP] 标记（单独一行）来把聊天界面拉到用户屏幕最前面。[JUMP] 不会展示给用户。")
         }
     }
 

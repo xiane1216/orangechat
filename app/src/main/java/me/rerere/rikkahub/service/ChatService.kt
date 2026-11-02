@@ -102,6 +102,7 @@ import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.model.toMessageNode
@@ -1138,6 +1139,89 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
                 Log.w(TAG, "Failed to save assistant message to external memory", e)
             }
         }
+    }
+
+    /**
+     * 与正常聊天完全一致的一代输入（工具列表/记忆/插件注入/输入转换器/会话级系统提示）。
+     *
+     * 供心跳等旁路生成链路复用：工具列表会渲染进系统提示词，与聊天差一个工具、
+     * 前缀就分叉，provider 端缓存全量 miss。
+     * 注意：sendMessage 内联的同名构造逻辑必须与本函数保持一致，改动时两处同步。
+     */
+    internal data class ChatAlignedInputs(
+        val tools: List<Tool>,
+        val memories: List<AssistantMemory>,
+        val pluginPromptInjections: List<String>,
+        val inputTransformers: List<InputMessageTransformer>,
+        val conversationSystemPrompt: String?,
+        val workspaceCwd: String?,
+    )
+
+    internal suspend fun buildChatAlignedInputs(
+        conversation: Conversation?,
+        assistant: Assistant,
+        settings: Settings,
+        conversationId: Uuid,
+    ): ChatAlignedInputs {
+        return ChatAlignedInputs(
+            tools = buildList {
+                if (settings.enableWebSearch) {
+                    addAll(createSearchTools(settings))
+                }
+                addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tools.ToolInvocationContext(
+                    callerAssistantId = assistant.id.toString(),
+                    callerConversationId = conversationId.toString(),
+                )))
+                // System tools (location, notifications, calendar, alarm, camera)
+                val systemToolsOptions = settings.systemToolsSetting.getEnabledOptions().toMutableSet()
+                // 如果存在启用的外置记忆库，始终启用 supabase_query 工具
+                if (settings.externalMemories.any { it.enabled }) {
+                    systemToolsOptions.add(me.rerere.rikkahub.data.ai.tools.SystemToolOption.SupabaseQuery)
+                }
+                if (systemToolsOptions.isNotEmpty()) {
+                    val systemTools = SystemTools(context, settings)
+                    addAll(systemTools.getTools(systemToolsOptions, conversation?.currentMessages ?: emptyList(), filesManager))
+                }
+                addAll(createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), conversation?.workspaceCwd))
+                if (assistant.enabledSkills.isNotEmpty()) {
+                    addAll(
+                        createSkillTools(
+                            enabledSkills = assistant.enabledSkills,
+                            allSkills = skillManager.listSkills(),
+                            skillManager = skillManager,
+                        )
+                    )
+                }
+                mcpManager.getAllAvailableTools().forEach { (serverId, tool) ->
+                    add(
+                        Tool(
+                            name = ToolNaming.buildMcpToolName(serverId, tool.name),
+                            description = tool.description ?: "",
+                            parameters = { tool.inputSchema },
+                            needsApproval = tool.needsApproval,
+                            execute = {
+                                mcpManager.callTool(serverId, tool.name, it.jsonObject)
+                            },
+                        )
+                    )
+                }
+                // Plugin tools
+                addAll(pluginToolProvider.getTools())
+            },
+            memories = if (assistant.useGlobalMemory) {
+                memoryRepository.getGlobalMemories()
+            } else {
+                memoryRepository.getMemoriesOfAssistant(assistant.id.toString())
+            },
+            pluginPromptInjections = pluginToolProvider.getPluginPromptInjections(),
+            inputTransformers = buildList {
+                addAll(inputTransformers)
+                add(templateTransformer)
+                add(workspaceReminderTransformer)
+            },
+            conversationSystemPrompt = conversation?.customSystemPrompt,
+            workspaceCwd = conversation?.workspaceCwd,
+        )
     }
 
     private suspend fun createWorkspaceToolsIfReady(workspaceId: String?, cwd: String? = null): List<Tool> {

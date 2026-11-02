@@ -364,6 +364,198 @@ class GenerationHandler(
     }.throttleLatest(STREAM_UI_THROTTLE_MS)
         .flowOn(Dispatchers.IO)
  
+    /**
+     * 构建与正常聊天完全一致的系统提示词。
+     *
+     * 供心跳等旁路生成链路复用：心跳请求的 system 必须与聊天请求逐字节一致，
+     * 否则 provider 端前缀缓存从第一条消息就分叉，整条请求全量 miss。
+     * generateInternal 直接调用本函数构造系统提示，单一实现，无漂移风险。
+     */
+    suspend fun buildChatSystemPrompt(
+        assistant: Assistant,
+        settings: Settings,
+        model: Model,
+        messages: List<UIMessage>,
+        tools: List<Tool>,
+        memories: List<AssistantMemory>,
+        pluginPromptInjections: List<String> = emptyList(),
+        conversationSystemPrompt: String? = null,
+        workspaceCwd: String? = null,
+    ): String {
+        return buildString {
+            val effectiveSystemPrompt =
+                if (assistant.allowConversationSystemPrompt && !conversationSystemPrompt.isNullOrBlank()) {
+                    conversationSystemPrompt
+                } else {
+                    assistant.systemPrompt
+                }
+            if (effectiveSystemPrompt.isNotBlank()) {
+                append(effectiveSystemPrompt)
+            }
+
+            // 记忆
+            if (assistant.enableMemory) {
+                appendLine()
+                append(buildMemoryPrompt(memories = memories))
+            }
+
+            // ---- 静态区: 代码文件说明 / 工具prompt / 插件注入 / 规则说明 ----
+            // 注意顺序: 这些内容在多次请求间保持不变, 放在外置记忆召回等动态内容
+            // 之前, 保证前缀稳定, 最大化 provider 端 prompt cache 命中率.
+
+            // 代码文件命名和ZIP打包功能说明
+            appendLine()
+            append(buildCodeBlockPrompt())
+
+            // 工具prompt
+            tools.forEach { tool ->
+                appendLine()
+                append(tool.systemPrompt(model, messages))
+            }
+
+            // 插件提示词注入
+            if (pluginPromptInjections.isNotEmpty()) {
+                pluginPromptInjections.forEach { injection ->
+                    appendLine()
+                    appendLine()
+                    append(injection)
+                }
+            }
+
+            // 允许跳过回复
+            if (assistant.allowSkipReply) {
+                appendLine()
+                appendLine()
+                appendLine("## Skip Reply")
+                appendLine("If you determine that no reply is needed (e.g., the user's message doesn't require a response, or you have nothing meaningful to add), you may reply with exactly `[SKIP]` (without any other text). This message will be hidden from the user. Use this sparingly and only when truly appropriate.")
+            }
+
+            // 屏幕跳转能力（AI总是可以跳转，不需要开关）
+            appendLine()
+            appendLine()
+            appendLine("## 屏幕跳转能力")
+            appendLine("你可以在回复末尾追加 [JUMP] 标记（单独一行）来把聊天界面拉到用户屏幕最前面。")
+            appendLine("适用场景：")
+            appendLine("- 用户说要去别的应用，你觉得需要把用户拉回来时")
+            appendLine("- 你觉得接下来的内容需要用户立即看到时")
+            appendLine("不适用场景：")
+            appendLine("- 一般闲聊不需要跳转")
+            appendLine("- 用户正在跟你正常对话时不需要跳转")
+            appendLine("[JUMP] 标记不会展示给用户，仅用于触发屏幕跳转。")
+
+            // 分气泡: 告知模型它自己能控制消息如何被拆成多个气泡
+            if (assistant.splitBubbleByLine) {
+                appendLine()
+                appendLine()
+                appendLine("## Message Bubbles")
+                appendLine("Your reply will be automatically split into separate chat bubbles at every line break (\\n) you write, similar to how a person sends several short texts in a row instead of one long message. You are fully in control of this: write a line break whenever you want the previous thought/sentence to appear as its own bubble, and keep things on the same line when they belong together. Do not insert blank lines purely for spacing — every line break becomes a new bubble, so use them intentionally. Exception: line breaks inside fenced code blocks (```) and Markdown tables are preserved as-is and will NOT create new bubbles, since those must stay intact as a single block.")
+            }
+
+            // ---- 动态区: 每次请求都会变化的内容, 统一放在系统提示词最末尾 ----
+
+            // 外置记忆库召回
+            try {
+                val externalMemoryConfigs = settings.externalMemories.filter {
+                    it.enabled && it.id in assistant.externalMemoryIds
+                }
+                externalMemoryConfigs.forEach { config ->
+                    Log.i(TAG, "ExternalMemory config: name=${config.name}, url=${config.supabaseUrl}, table=${config.tableName}, summaryTable=${config.summariesTableName}, embeddingModelId=${config.embeddingModelId}, autoSaveDiarySummary=${config.autoSaveDiarySummary}")
+                }
+                if (externalMemoryConfigs.isNotEmpty()) {
+                    val lastUserMessage = messages.lastOrNull { it.role == MessageRole.USER }
+                    val queryText = lastUserMessage?.toText()?.take(200)?.trim() ?: ""
+                    // 并发检索所有外置记忆库配置，每个配置最多 8 秒超时
+                    val allRecalled = coroutineScope {
+                        externalMemoryConfigs.map { config ->
+                            async {
+                                withTimeoutOrNull(8.seconds) {
+                                    runCatching {
+                                        val service = me.rerere.rikkahub.data.service.ExternalMemoryService(config)
+                                        val recalled = mutableListOf<String>()
+
+                                        // 如果配置了向量模型且开启了日记摘要，使用向量召回日记摘要
+                                        if (config.embeddingModelId != null && queryText.isNotBlank() && config.autoSaveDiarySummary) {
+                                            val embeddingModel = settings.findModelById(config.embeddingModelId)
+                                            if (embeddingModel != null) {
+                                                val embeddingProvider = embeddingModel.findProvider(settings.providers)
+                                                if (embeddingProvider != null) {
+                                                    val embeddingProviderImpl = providerManager.getProviderByType(embeddingProvider)
+                                                    val embedResult = embeddingProviderImpl.generateEmbedding(
+                                                        providerSetting = embeddingProvider,
+                                                        params = EmbeddingGenerationParams(
+                                                            model = embeddingModel,
+                                                            input = listOf(queryText),
+                                                        )
+                                                    )
+                                                    val queryEmbedding = embedResult.embeddings.firstOrNull()
+                                                    if (queryEmbedding != null) {
+                                                        val recalledSummaries = service.vectorRecallSummaries(
+                                                            queryEmbedding = queryEmbedding,
+                                                            assistantId = assistant.id.toString(),
+                                                            count = config.recallCount,
+                                                        ).getOrDefault(emptyList())
+                                                        recalledSummaries.forEach { summary ->
+                                                            recalled.add(summary.content)
+                                                        }
+                                                        Log.d(TAG, "Vector recall ${recalledSummaries.size} summaries from ${config.name}")
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            // 回退：文本召回聊天记录
+                                            val recalledMessages = if (queryText.isNotBlank()) {
+                                                service.searchMessages(
+                                                    assistantId = assistant.id.toString(),
+                                                    keyword = queryText,
+                                                    limit = config.recallCount,
+                                                ).getOrDefault(emptyList())
+                                            } else {
+                                                service.queryLatestMessages(
+                                                    assistantId = assistant.id.toString(),
+                                                    limit = config.recallCount,
+                                                ).getOrDefault(emptyList())
+                                            }
+                                            recalledMessages.forEach { msg ->
+                                                val prefix = when (msg.role) {
+                                                    "assistant" -> "AI"
+                                                    "user" -> "用户"
+                                                    else -> msg.role
+                                                }
+                                                recalled.add("[$prefix] ${msg.content}")
+                                            }
+                                        }
+                                        recalled
+                                    }.onFailure {
+                                        Log.w(TAG, "External memory recall failed for ${config.name}", it)
+                                    }.getOrNull()
+                                } ?: run {
+                                    Log.w(TAG, "External memory recall timed out for ${config.name}")
+                                    null
+                                }
+                            }
+                        }.awaitAll()
+                            .filterNotNull()
+                            .flatten()
+                    }
+                    if (allRecalled.isNotEmpty()) {
+                        appendLine()
+                        appendLine("## 外置记忆库")
+                        allRecalled.reversed().forEachIndexed { index, memory ->
+                            appendLine("${index + 1}. ${memory}")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "External memory recall failed", e)
+            }
+
+            if (assistant.enableRecentChatsReference) {
+                appendLine()
+                append(buildRecentChatsPrompt(assistant, conversationRepo))
+            }
+        }
+    }
+
     private suspend fun generateInternal(
         assistant: Assistant,
         settings: Settings,
@@ -382,179 +574,17 @@ class GenerationHandler(
         workspaceCwd: String? = null,
     ) {
         val internalMessages = buildList {
-            val system = buildString {
-                val effectiveSystemPrompt =
-                    if (assistant.allowConversationSystemPrompt && !conversationSystemPrompt.isNullOrBlank()) {
-                        conversationSystemPrompt
-                    } else {
-                        assistant.systemPrompt
-                    }
-                if (effectiveSystemPrompt.isNotBlank()) {
-                    append(effectiveSystemPrompt)
-                }
- 
-                // 记忆
-                if (assistant.enableMemory) {
-                    appendLine()
-                    append(buildMemoryPrompt(memories = memories))
-                }
-
-                // ---- 静态区: 代码文件说明 / 工具prompt / 插件注入 / 规则说明 ----
-                // 注意顺序: 这些内容在多次请求间保持不变, 放在外置记忆召回等动态内容
-                // 之前, 保证前缀稳定, 最大化 provider 端 prompt cache 命中率.
-
-                // 代码文件命名和ZIP打包功能说明
-                appendLine()
-                append(buildCodeBlockPrompt())
-
-                // 工具prompt
-                tools.forEach { tool ->
-                    appendLine()
-                    append(tool.systemPrompt(model, messages))
-                }
-
-                // 插件提示词注入
-                if (pluginPromptInjections.isNotEmpty()) {
-                    pluginPromptInjections.forEach { injection ->
-                        appendLine()
-                        appendLine()
-                        append(injection)
-                    }
-                }
-
-                // 允许跳过回复
-                if (assistant.allowSkipReply) {
-                    appendLine()
-                    appendLine()
-                    appendLine("## Skip Reply")
-                    appendLine("If you determine that no reply is needed (e.g., the user's message doesn't require a response, or you have nothing meaningful to add), you may reply with exactly `[SKIP]` (without any other text). This message will be hidden from the user. Use this sparingly and only when truly appropriate.")
-                }
-
-                // 屏幕跳转能力（AI总是可以跳转，不需要开关）
-                appendLine()
-                appendLine()
-                appendLine("## 屏幕跳转能力")
-                appendLine("你可以在回复末尾追加 [JUMP] 标记（单独一行）来把聊天界面拉到用户屏幕最前面。")
-                appendLine("适用场景：")
-                appendLine("- 用户说要去别的应用，你觉得需要把用户拉回来时")
-                appendLine("- 你觉得接下来的内容需要用户立即看到时")
-                appendLine("不适用场景：")
-                appendLine("- 一般闲聊不需要跳转")
-                appendLine("- 用户正在跟你正常对话时不需要跳转")
-                appendLine("[JUMP] 标记不会展示给用户，仅用于触发屏幕跳转。")
-
-                // 分气泡: 告知模型它自己能控制消息如何被拆成多个气泡
-                if (assistant.splitBubbleByLine) {
-                    appendLine()
-                    appendLine()
-                    appendLine("## Message Bubbles")
-                    appendLine("Your reply will be automatically split into separate chat bubbles at every line break (\\n) you write, similar to how a person sends several short texts in a row instead of one long message. You are fully in control of this: write a line break whenever you want the previous thought/sentence to appear as its own bubble, and keep things on the same line when they belong together. Do not insert blank lines purely for spacing — every line break becomes a new bubble, so use them intentionally. Exception: line breaks inside fenced code blocks (```) and Markdown tables are preserved as-is and will NOT create new bubbles, since those must stay intact as a single block.")
-                }
-
-                // ---- 动态区: 每次请求都会变化的内容, 统一放在系统提示词最末尾 ----
-
-                // 外置记忆库召回
-                try {
-                    val externalMemoryConfigs = settings.externalMemories.filter {
-                        it.enabled && it.id in assistant.externalMemoryIds
-                    }
-                    externalMemoryConfigs.forEach { config ->
-                        Log.i(TAG, "ExternalMemory config: name=${config.name}, url=${config.supabaseUrl}, table=${config.tableName}, summaryTable=${config.summariesTableName}, embeddingModelId=${config.embeddingModelId}, autoSaveDiarySummary=${config.autoSaveDiarySummary}")
-                    }
-                    if (externalMemoryConfigs.isNotEmpty()) {
-                        val lastUserMessage = messages.lastOrNull { it.role == MessageRole.USER }
-                        val queryText = lastUserMessage?.toText()?.take(200)?.trim() ?: ""
-                        // 并发检索所有外置记忆库配置，每个配置最多 8 秒超时
-                        val allRecalled = coroutineScope {
-                            externalMemoryConfigs.map { config ->
-                                async {
-                                    withTimeoutOrNull(8.seconds) {
-                                        runCatching {
-                                            val service = me.rerere.rikkahub.data.service.ExternalMemoryService(config)
-                                            val recalled = mutableListOf<String>()
-
-                            // 如果配置了向量模型且开启了日记摘要，使用向量召回日记摘要
-                            if (config.embeddingModelId != null && queryText.isNotBlank() && config.autoSaveDiarySummary) {
-                                                val embeddingModel = settings.findModelById(config.embeddingModelId)
-                                                if (embeddingModel != null) {
-                                                    val embeddingProvider = embeddingModel.findProvider(settings.providers)
-                                                    if (embeddingProvider != null) {
-                                                        val embeddingProviderImpl = providerManager.getProviderByType(embeddingProvider)
-                                                        val embedResult = embeddingProviderImpl.generateEmbedding(
-                                                            providerSetting = embeddingProvider,
-                                                            params = EmbeddingGenerationParams(
-                                                                model = embeddingModel,
-                                                                input = listOf(queryText),
-                                                            )
-                                                        )
-                                                        val queryEmbedding = embedResult.embeddings.firstOrNull()
-                                                        if (queryEmbedding != null) {
-                                                            val recalledSummaries = service.vectorRecallSummaries(
-                                                                queryEmbedding = queryEmbedding,
-                                                                assistantId = assistant.id.toString(),
-                                                                count = config.recallCount,
-                                                            ).getOrDefault(emptyList())
-                                                            recalledSummaries.forEach { summary ->
-                                                                recalled.add(summary.content)
-                                                            }
-                                                            Log.d(TAG, "Vector recall ${recalledSummaries.size} summaries from ${config.name}")
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                // 回退：文本召回聊天记录
-                                                val recalledMessages = if (queryText.isNotBlank()) {
-                                                    service.searchMessages(
-                                                        assistantId = assistant.id.toString(),
-                                                        keyword = queryText,
-                                                        limit = config.recallCount,
-                                                    ).getOrDefault(emptyList())
-                                                } else {
-                                                    service.queryLatestMessages(
-                                                        assistantId = assistant.id.toString(),
-                                                        limit = config.recallCount,
-                                                    ).getOrDefault(emptyList())
-                                                }
-                                                recalledMessages.forEach { msg ->
-                                                    val prefix = when (msg.role) {
-                                                        "assistant" -> "AI"
-                                                        "user" -> "用户"
-                                                        else -> msg.role
-                                                    }
-                                                    recalled.add("[$prefix] ${msg.content}")
-                                                }
-                                            }
-                                            recalled
-                                        }.onFailure {
-                                            Log.w(TAG, "External memory recall failed for ${config.name}", it)
-                                        }.getOrNull()
-                                    } ?: run {
-                                        Log.w(TAG, "External memory recall timed out for ${config.name}")
-                                        null
-                                    }
-                                }
-                            }.awaitAll()
-                                .filterNotNull()
-                                .flatten()
-                        }
-                        if (allRecalled.isNotEmpty()) {
-                            appendLine()
-                            appendLine("## 外置记忆库")
-                            allRecalled.reversed().forEachIndexed { index, memory ->
-                                appendLine("${index + 1}. ${memory}")
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "External memory recall failed", e)
-                }
-
-                if (assistant.enableRecentChatsReference) {
-                    appendLine()
-                    append(buildRecentChatsPrompt(assistant, conversationRepo))
-                }
-
-            }
+            val system = buildChatSystemPrompt(
+                assistant = assistant,
+                settings = settings,
+                model = model,
+                messages = messages,
+                tools = tools,
+                memories = memories,
+                pluginPromptInjections = pluginPromptInjections,
+                conversationSystemPrompt = conversationSystemPrompt,
+                workspaceCwd = workspaceCwd,
+            )
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))
             addAll(
                 messages
