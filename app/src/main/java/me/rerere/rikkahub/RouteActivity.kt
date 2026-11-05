@@ -1086,6 +1086,8 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingHeartbeat : Screen
+
+    @Serializable
     data object SettingPrivilegeCard : Screen
 
     @Serializable
