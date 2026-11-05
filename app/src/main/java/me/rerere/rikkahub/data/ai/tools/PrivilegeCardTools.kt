@@ -13,6 +13,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.add
 import me.rerere.ai.core.InputSchema

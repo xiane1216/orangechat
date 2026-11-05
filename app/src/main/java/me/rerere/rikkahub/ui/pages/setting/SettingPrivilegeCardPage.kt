@@ -88,7 +88,7 @@ private fun cardIcon(id: String): ImageVector = when (id) {
     else -> Lucide.Heart
 }
 
-private val LogTimeFormat = SimpleDateFormat("MM月dd日 HH:mm", Locale.getDefault)
+private val LogTimeFormat = SimpleDateFormat("MM月dd日 HH:mm", Locale.getDefault())
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
