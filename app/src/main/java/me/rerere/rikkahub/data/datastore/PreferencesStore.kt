@@ -46,6 +46,7 @@ import me.rerere.rikkahub.data.model.InjectionPosition
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.MiniApp
 import me.rerere.rikkahub.data.model.PromptInjection
+import me.rerere.rikkahub.data.model.PrivilegeCardSetting
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.data.sync.s3.S3Config
@@ -168,6 +169,9 @@ class SettingsStore(
 
         // 心跳机制设置
         val HEARTBEAT_SETTING = stringPreferencesKey("heartbeat_setting")
+
+        // 小乖特权卡
+        val PRIVILEGE_CARD_SETTING = stringPreferencesKey("privilege_card_setting")
 
         // 保活服务设置
         val KEEP_ALIVE_ENABLED = booleanPreferencesKey("keep_alive_enabled")
@@ -299,6 +303,9 @@ class SettingsStore(
                 heartbeatSetting = preferences[HEARTBEAT_SETTING]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: HeartbeatSetting(),
+                privilegeCardSetting = preferences[PRIVILEGE_CARD_SETTING]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: PrivilegeCardSetting(),
                 wechatBotSetting = preferences[WECHAT_BOT_SETTING]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: WechatBotSetting(),
@@ -489,6 +496,7 @@ class SettingsStore(
             preferences[SYSTEM_TOOLS_SETTING] = JsonInstant.encodeToString(settings.systemToolsSetting)
             preferences[PROACTIVE_MESSAGE_SETTING] = JsonInstant.encodeToString(settings.proactiveMessageSetting)
             preferences[HEARTBEAT_SETTING] = JsonInstant.encodeToString(settings.heartbeatSetting)
+            preferences[PRIVILEGE_CARD_SETTING] = JsonInstant.encodeToString(settings.privilegeCardSetting)
             preferences[WECHAT_BOT_SETTING] = JsonInstant.encodeToString(settings.wechatBotSetting)
             preferences[QQ_BOT_SETTING] = JsonInstant.encodeToString(settings.qqBotSetting)
             preferences[KEEP_ALIVE_ENABLED] = settings.keepAliveEnabled
@@ -630,6 +638,7 @@ data class Settings(
     val systemToolsSetting: SystemToolsSetting = SystemToolsSetting(),
     val proactiveMessageSetting: ProactiveMessageSetting = ProactiveMessageSetting(),
     val heartbeatSetting: HeartbeatSetting = HeartbeatSetting(),
+    val privilegeCardSetting: PrivilegeCardSetting = PrivilegeCardSetting(),
     val wechatBotSetting: WechatBotSetting = WechatBotSetting(),
     val qqBotSetting: QqBotSetting = QqBotSetting(),
     val keepAliveEnabled: Boolean = false,

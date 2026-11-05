@@ -50,6 +50,7 @@ import me.rerere.hugeicons.stroke.AiMagic
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.CloudServer
 import me.rerere.hugeicons.stroke.Book01
+import me.rerere.hugeicons.stroke.Ticket01
 import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.hugeicons.stroke.Brain02
@@ -284,6 +285,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         leadingContent = { Icon(HugeIcons.Pulse01, null) },
                         supportingContent = { Text("你连续 N 分钟没回消息时，AI 主动关心你（独立于主动消息）") },
                         headlineContent = { Text("心跳机制") },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingPrivilegeCard) },
+                        leadingContent = { Icon(HugeIcons.Ticket01, null) },
+                        supportingContent = { Text("情侣特权券：爸爸的卡与宝宝的卡，AI 聊天中自动查卡/用卡/发卡") },
+                        headlineContent = { Text("小乖特权卡") },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingWeixinBot) },

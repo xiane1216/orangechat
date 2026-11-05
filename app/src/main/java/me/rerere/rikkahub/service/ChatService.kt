@@ -76,6 +76,7 @@ import me.rerere.rikkahub.data.ai.tools.ToolNaming
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
+import me.rerere.rikkahub.data.ai.tools.createPrivilegeCardTool
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.plugin.loader.PluginLoader
 import me.rerere.rikkahub.plugin.provider.PluginToolProvider
@@ -955,7 +956,11 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
                             )
                         )
                     }
-                    // Plugin tools
+                    // 小乖特权卡（聊天与心跳两处装配点同步插入，保持前缀同构）
+                if (settings.privilegeCardSetting.enabled) {
+                    add(createPrivilegeCardTool(context, settingsStore))
+                }
+                // Plugin tools
                     addAll(pluginToolProvider.getTools())
                 },
                 pluginPromptInjections = pluginToolProvider.getPluginPromptInjections(),
@@ -1205,6 +1210,10 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
                             },
                         )
                     )
+                }
+                // 小乖特权卡（聊天与心跳两处装配点同步插入，保持前缀同构）
+                if (settings.privilegeCardSetting.enabled) {
+                    add(createPrivilegeCardTool(context, settingsStore))
                 }
                 // Plugin tools
                 addAll(pluginToolProvider.getTools())
