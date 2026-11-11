@@ -10,7 +10,12 @@ pluginManagement {
                 excludeGroup("com.google.devtools.ksp")
             }
         }
-        maven("https://maven.aliyun.com/repository/public")
+        maven("https://maven.aliyun.com/repository/public") {
+            // 阿里云镜像对 KSP 组整体回源 502（CI 实测），排除后由后续仓库兜底
+            content {
+                excludeGroup("com.google.devtools.ksp")
+            }
+        }
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
@@ -42,7 +47,12 @@ dependencyResolutionManagement {
                 excludeGroup("com.google.devtools.ksp")
             }
         }
-        maven("https://maven.aliyun.com/repository/public")
+        maven("https://maven.aliyun.com/repository/public") {
+            // 阿里云镜像对 KSP 组整体回源 502（CI 实测），排除后由后续仓库兜底
+            content {
+                excludeGroup("com.google.devtools.ksp")
+            }
+        }
         maven("https://mirrors.cloud.tencent.com/repository/maven")
         // jitpack 包 (com.github.*) 必须走 jitpack，置于 mavenCentral 之前
         maven("https://jitpack.io")
