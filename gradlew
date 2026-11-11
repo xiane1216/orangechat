@@ -181,6 +181,27 @@ save () {
 APP_ARGS=`save "$@"`
 
 # Collect all arguments for the java command, following the shell quoting and substitution rules
+# ---- CI 网络诊断 + wrapper 缓存预热 ----
+# 部分 CI runner 的 JVM 出网被系统拒绝（Connection refused），但 curl/git 正常。
+# 这里改用 curl 预先下载 Gradle 发行版并按 wrapper 缓存结构解压（zip + .ok 标记），
+# wrapper 检测到 .ok 存在即跳过自身下载，完全绕开 JVM 网络。
+DIST_HASH="45w7kj7s8jzqenl33wrwa0aoj"   # md5(distributionUrl).toString(36)，与 wrapper 算法一致
+DIST_URL="https://mirrors.cloud.tencent.com/gradle/gradle-9.4.1-bin.zip"
+DIST_ROOT="${GRADLE_USER_HOME:-$HOME/.gradle}/wrapper/dists/gradle-9.4.1-bin/$DIST_HASH"
+if [ ! -f "$DIST_ROOT/gradle-9.4.1-bin.zip.ok" ] && command -v curl >/dev/null 2>&1; then
+  echo "[ci-preheat] proxy env: $(env | grep -i proxy || echo none)"
+  echo "[ci-preheat] dns: $(getent hosts mirrors.cloud.tencent.com || echo 'resolve failed')"
+  mkdir -p "$DIST_ROOT"
+  if curl -fsSL --retry 3 --connect-timeout 15 -o "$DIST_ROOT/gradle-9.4.1-bin.zip" "$DIST_URL"; then
+    ( cd "$DIST_ROOT" && unzip -oq gradle-9.4.1-bin.zip && touch gradle-9.4.1-bin.zip.ok ) \
+      && echo "[ci-preheat] OK: Gradle 经 curl 预热完成" \
+      || { echo "[ci-preheat] 解压失败，回退 wrapper 下载"; rm -rf "$DIST_ROOT"; }
+  else
+    echo "[ci-preheat] curl 下载失败，回退 wrapper 自行下载"
+    rm -rf "$DIST_ROOT"
+  fi
+fi
+
 eval set -- $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS "\"-Dorg.gradle.appname=$APP_BASE_NAME\"" -classpath "\"$CLASSPATH\"" org.gradle.wrapper.GradleWrapperMain "$APP_ARGS"
 
 exec "$JAVACMD" "$@"
