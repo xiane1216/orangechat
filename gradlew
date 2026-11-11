@@ -214,6 +214,11 @@ EOF
   # 彻底起见：CI 上直接移除项目 gradle.properties 里的本地代理行（127.0.0.1:18080 仅存在于本地沙箱容器）
   sed -i '/proxyHost/d; /proxyPort/d' "$(pwd)/gradle.properties" 2>/dev/null || true
   echo "[ci-preheat] CI 环境: 已覆盖 JVM 代理为直连（user 级 + 项目级代理行已移除）"
+  # web 模块 buildWebUi 任务需要 pnpm，runner 只有 node/npm
+  if ! command -v pnpm >/dev/null 2>&1; then
+    npm install -g pnpm >/dev/null 2>&1 && echo "[ci-preheat] pnpm 已安装: $(pnpm -v 2>/dev/null)" \
+      || echo "[ci-preheat] pnpm 安装失败（corepack 也不可用时 web 模块会挂）"
+  fi
   # 仓库连通性诊断：curl（shell 网络）对比
   for u in https://plugins.gradle.org https://repo1.maven.org https://maven.aliyun.com; do
     echo "[ci-diag] curl $u => $(curl -sI -o /dev/null -w '%{http_code}' --max-time 10 "$u" || echo FAIL)"
