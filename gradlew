@@ -229,6 +229,11 @@ EOF
   timeout 40 "$JAVA_HOME/bin/jshell" -J-Djava.net.preferIPv4Stack=true /tmp/nettest.jsh 2>&1 | grep -E "JVM (dns|socket)" || echo "[ci-diag] jshell 测试失败"
 fi
 
+# CI 上追加 --info，让插件/依赖解析的每个仓库请求细节进日志（排障用，不影响结果）
+if [ "$CI" = "true" ]; then
+  APP_ARGS="$APP_ARGS '--info'"
+fi
+
 eval set -- $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS "\"-Dorg.gradle.appname=$APP_BASE_NAME\"" -classpath "\"$CLASSPATH\"" org.gradle.wrapper.GradleWrapperMain "$APP_ARGS"
 
 exec "$JAVACMD" "$@"
