@@ -6,6 +6,8 @@ pluginManagement {
                 includeGroupByRegex("com\\.android.*")
                 includeGroupByRegex("com\\.google.*")
                 includeGroupByRegex("androidx.*")
+                // aliyun google 对 KSP 组回源 502（CI 实测），排除后由 aliyun public/mavenCentral/portal 兜底
+                excludeGroup("com.google.devtools.ksp")
             }
         }
         maven("https://maven.aliyun.com/repository/public")
@@ -34,7 +36,12 @@ plugins {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        maven("https://maven.aliyun.com/repository/google")
+        maven("https://maven.aliyun.com/repository/google") {
+            // 同上：KSP 组在该镜像回源 502，排除后走后续仓库
+            content {
+                excludeGroup("com.google.devtools.ksp")
+            }
+        }
         maven("https://maven.aliyun.com/repository/public")
         maven("https://mirrors.cloud.tencent.com/repository/maven")
         // jitpack 包 (com.github.*) 必须走 jitpack，置于 mavenCentral 之前
