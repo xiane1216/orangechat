@@ -202,6 +202,18 @@ if [ ! -f "$DIST_ROOT/gradle-9.4.1-bin.zip.ok" ] && command -v curl >/dev/null 2
   fi
 fi
 
+# ---- CI: 覆盖项目 gradle.properties 的本地代理（127.0.0.1:18080）----
+# 该代理只存在于本地沙箱容器；CI runner 上无此代理，JVM 全部连接会被秒拒。
+# GRADLE_USER_HOME 级 properties 优先级高于项目级，用 nonProxyHosts=* 让 JVM 全部直连。
+if [ "$CI" = "true" ]; then
+  mkdir -p "${GRADLE_USER_HOME:-$HOME/.gradle}"
+  cat > "${GRADLE_USER_HOME:-$HOME/.gradle}/gradle.properties" <<'EOF'
+systemProp.http.nonProxyHosts=*
+systemProp.https.nonProxyHosts=*
+EOF
+  echo "[ci-preheat] CI 环境: 已覆盖 JVM 代理为直连"
+fi
+
 eval set -- $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS "\"-Dorg.gradle.appname=$APP_BASE_NAME\"" -classpath "\"$CLASSPATH\"" org.gradle.wrapper.GradleWrapperMain "$APP_ARGS"
 
 exec "$JAVACMD" "$@"
