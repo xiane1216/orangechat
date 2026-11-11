@@ -213,7 +213,9 @@ systemProp.https.nonProxyHosts=*
 EOF
   # 彻底起见：CI 上直接移除项目 gradle.properties 里的本地代理行（127.0.0.1:18080 仅存在于本地沙箱容器）
   sed -i '/proxyHost/d; /proxyPort/d' "$(pwd)/gradle.properties" 2>/dev/null || true
-  echo "[ci-preheat] CI 环境: 已覆盖 JVM 代理为直连（user 级 + 项目级代理行已移除）"
+  # 阿里云镜像不稳定（大面积回源 502），CI 全程换官方源；本地构建不受影响
+  sed -i 's#https://maven.aliyun.com/repository/google#https://dl.google.com/dl/android/maven2#g; s#https://maven.aliyun.com/repository/public#https://repo1.maven.org/maven2#g' "$(pwd)/settings.gradle.kts"
+  echo "[ci-preheat] CI 环境: 代理已移除，仓库已切换为官方源"
   # web 模块 buildWebUi 任务需要 pnpm，runner 只有 node/npm
   if ! command -v pnpm >/dev/null 2>&1; then
     npm install -g pnpm >/dev/null 2>&1 && echo "[ci-preheat] pnpm 已安装: $(pnpm -v 2>/dev/null)" \
