@@ -212,6 +212,19 @@ systemProp.http.nonProxyHosts=*
 systemProp.https.nonProxyHosts=*
 EOF
   echo "[ci-preheat] CI 环境: 已覆盖 JVM 代理为直连"
+  # 仓库连通性诊断：curl（shell 网络）对比
+  for u in https://plugins.gradle.org https://repo1.maven.org https://maven.aliyun.com; do
+    echo "[ci-diag] curl $u => $(curl -sI -o /dev/null -w '%{http_code}' --max-time 10 "$u" || echo FAIL)"
+  done
+  # JVM socket 实测（与 daemon 同网络栈）
+  cat > /tmp/nettest.jsh <<'EOF'
+import java.net.*;
+for (InetAddress a : InetAddress.getAllByName("repo1.maven.org")) System.out.println("JVM dns=" + a);
+Socket s = new Socket("repo1.maven.org", 443);
+System.out.println("JVM socket OK=" + s.isConnected());
+s.close();
+EOF
+  timeout 40 "$JAVA_HOME/bin/jshell" -J-Djava.net.preferIPv4Stack=true /tmp/nettest.jsh 2>&1 | grep -E "JVM (dns|socket)" || echo "[ci-diag] jshell 测试失败"
 fi
 
 eval set -- $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS "\"-Dorg.gradle.appname=$APP_BASE_NAME\"" -classpath "\"$CLASSPATH\"" org.gradle.wrapper.GradleWrapperMain "$APP_ARGS"
