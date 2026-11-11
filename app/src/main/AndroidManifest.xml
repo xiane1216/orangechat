@@ -337,13 +337,17 @@
         android:value="background music playback" />
     </service>
 
-    <!-- KeepAlive Service -->
+    <!-- KeepAlive Service: specialUse 类型不受 dataSync 每 24h 6h 配额限制（配额耗尽会 ForegroundServiceDidNotStopInTimeException 崩溃） -->
     <service
       android:name=".service.KeepAliveService"
       android:enabled="true"
       android:exported="false"
-      android:foregroundServiceType="dataSync"
-      android:stopWithTask="false" />
+      android:foregroundServiceType="specialUse"
+      android:stopWithTask="false">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="keep-alive for scheduled messages and heartbeat" />
+    </service>
 
     <!-- 微信 Bot (iLink 协议): 长轮询收微信消息, 转给关联助手处理, 回复发回微信 -->
     <service
