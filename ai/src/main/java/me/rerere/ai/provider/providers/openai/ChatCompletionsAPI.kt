@@ -554,29 +554,43 @@ class ChatCompletionsAPI(
                 }
             }
 
-            if (params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()) {
+            // DeepSeek 服务端联网工具 (deepseek_web_search / deepseek_read_url):
+            // 搜索和抓取都在 DeepSeek 服务端完成, 客户端只需在 tools 里声明, 无需执行任何工具.
+            // 与本地 function tools 共存于同一个 tools 数组.
+            // 文档: https://api-docs.deepseek.com/zh-cn/guides/web_tools
+            val deepseekServerTools = buildList {
+                if (providerSetting.deepseekWebSearch) add("deepseek_web_search")
+                if (providerSetting.deepseekReadUrl) add("deepseek_read_url")
+            }
+            val hasFunctionTools = params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
+            if (hasFunctionTools || deepseekServerTools.isNotEmpty()) {
                 putJsonArray("tools") {
-                    params.tools.forEach { tool ->
-                        add(buildJsonObject {
-                            put("type", "function")
-                            put("function", buildJsonObject {
-                                put("name", tool.name)
-                                put("description", tool.description)
-                                // parameters() may return null (e.g. MCP gateway tools without
-                                // inputSchema). Serializing null → "parameters": null is rejected
-                                // by strict providers (Zhipu GLM returns "Invalid request body").
-                                // Fall back to an empty object schema so the request is always valid.
-                                val schema = tool.parameters()
-                                if (schema != null) {
-                                    put("parameters", json.encodeToJsonElement(schema))
-                                } else {
-                                    put("parameters", buildJsonObject {
-                                        put("type", "object")
-                                        put("properties", buildJsonObject { })
-                                    })
-                                }
+                    deepseekServerTools.forEach { type ->
+                        add(buildJsonObject { put("type", type) })
+                    }
+                    if (hasFunctionTools) {
+                        params.tools.forEach { tool ->
+                            add(buildJsonObject {
+                                put("type", "function")
+                                put("function", buildJsonObject {
+                                    put("name", tool.name)
+                                    put("description", tool.description)
+                                    // parameters() may return null (e.g. MCP gateway tools without
+                                    // inputSchema). Serializing null → "parameters": null is rejected
+                                    // by strict providers (Zhipu GLM returns "Invalid request body").
+                                    // Fall back to an empty object schema so the request is always valid.
+                                    val schema = tool.parameters()
+                                    if (schema != null) {
+                                        put("parameters", json.encodeToJsonElement(schema))
+                                    } else {
+                                        put("parameters", buildJsonObject {
+                                            put("type", "object")
+                                            put("properties", buildJsonObject { })
+                                        })
+                                    }
+                                })
                             })
-                        })
+                        }
                     }
                 }
             }

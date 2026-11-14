@@ -42,6 +42,7 @@ fun ASRProviderConfigure(
                     is ASRProviderSetting.SiliconFlow -> "SiliconFlow"
                     is ASRProviderSetting.Volcengine -> "Volcengine"
                     is ASRProviderSetting.MiMo -> "MiMo"
+                    is ASRProviderSetting.DeepSeek -> "DeepSeek"
                 },
                 onValueChange = {},
                 readOnly = true,
@@ -66,6 +67,7 @@ fun ASRProviderConfigure(
             is ASRProviderSetting.SiliconFlow -> SiliconFlowASRConfiguration(setting, onValueChange)
             is ASRProviderSetting.Volcengine -> VolcengineASRConfiguration(setting, onValueChange)
             is ASRProviderSetting.MiMo -> MiMoASRConfiguration(setting, onValueChange)
+            is ASRProviderSetting.DeepSeek -> DeepSeekASRConfiguration(setting, onValueChange)
         }
     }
 }
@@ -375,6 +377,52 @@ private fun MiMoASRConfiguration(
             },
             modifier = Modifier.fillMaxWidth(),
             label = "Segment Duration (s)"
+        )
+    }
+}
+
+@Composable
+private fun DeepSeekASRConfiguration(
+    setting: ASRProviderSetting.DeepSeek,
+    onValueChange: (ASRProviderSetting) -> Unit
+) {
+    FormItem(
+        label = { Text(stringResource(R.string.setting_asr_configure_api_key)) },
+        description = { Text("DeepSeek API Key") }
+    ) {
+        OutlinedTextField(
+            value = setting.apiKey,
+            onValueChange = { onValueChange(setting.copy(apiKey = it)) },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("sk-...") }
+        )
+    }
+
+    FormItem(
+        label = { Text(stringResource(R.string.setting_asr_configure_base_url)) },
+        description = { Text("DeepSeek 语音识别 API 地址 (16bit PCM WAV, 单次 ≤8MiB ≤120s)") }
+    ) {
+        OutlinedTextField(
+            value = setting.baseUrl,
+            onValueChange = { onValueChange(setting.copy(baseUrl = it)) },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("https://api.deepseek.com/v1/tools/asr") }
+        )
+    }
+
+    FormItem(
+        label = { Text(stringResource(R.string.setting_asr_configure_sample_rate)) },
+        description = { Text("录音采样率, 默认 16000") }
+    ) {
+        OutlinedNumberInput(
+            value = setting.sampleRate,
+            onValueChange = { value ->
+                if (value in 8000..48000) {
+                    onValueChange(setting.copy(sampleRate = value))
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            label = "Sample Rate"
         )
     }
 }

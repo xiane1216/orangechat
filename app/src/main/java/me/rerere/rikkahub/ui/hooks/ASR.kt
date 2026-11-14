@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.first
 import me.rerere.asr.ASRController
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.ASRState
+import me.rerere.asr.providers.DeepSeekASRController
 import me.rerere.asr.providers.MiMoASRController
 import me.rerere.asr.providers.OpenAIRealtimeASRController
 import me.rerere.asr.providers.SiliconFlowASRController
@@ -227,6 +228,14 @@ internal class CustomAsrStateImpl(
                         return null
                     }
                     MiMoASRController(context, httpClient, provider)
+                }
+
+                is ASRProviderSetting.DeepSeek -> {
+                    if (provider.apiKey.isBlank()) {
+                        Log.w(ASR_TAG, "createController: DeepSeek apiKey 为空")
+                        return null
+                    }
+                    DeepSeekASRController(context, httpClient, provider)
                 }
             }
         } catch (e: Exception) {

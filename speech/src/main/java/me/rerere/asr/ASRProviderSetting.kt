@@ -127,6 +127,34 @@ sealed class ASRProviderSetting {
         }
     }
 
+    /**
+     * DeepSeek ASR (POST {baseUrl}, multipart "file" 字段)。
+     *
+     * 输入为 16bit PCM WAV 或 Ogg Opus, 单次请求 ≤8MiB 且 ≤120 秒;
+     * 返回 JSON {request_id, text, duration_ms}。
+     * 分段策略与 SiliconFlow 相同: 边录边按小段上传, 近实时出字。
+     * 官方文档: https://api-docs.deepseek.com/zh-cn/api/asr
+     */
+    @Serializable
+    @SerialName("deepseek")
+    data class DeepSeek(
+        override val id: Uuid = Uuid.random(),
+        override val name: String = "DeepSeek ASR",
+        val apiKey: String = "",
+        val baseUrl: String = "https://api.deepseek.com/v1/tools/asr",
+        val sampleRate: Int = 16000,
+    ) : ASRProviderSetting() {
+        override fun copyProvider(
+            id: Uuid,
+            name: String,
+        ): ASRProviderSetting {
+            return this.copy(
+                id = id,
+                name = name,
+            )
+        }
+    }
+
     companion object {
         val Types by lazy {
             listOf(
@@ -134,6 +162,7 @@ sealed class ASRProviderSetting {
                 SiliconFlow::class,
                 Volcengine::class,
                 MiMo::class,
+                DeepSeek::class,
             )
         }
     }

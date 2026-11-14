@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -334,6 +335,36 @@ private fun ColumnScope.ProviderConfigureOpenAI(
                         type = ToastType.Warning
                     )
                 }
+            }
+        )
+    }
+
+    // DeepSeek 服务端联网工具: 搜索/抓取都在 DeepSeek 服务器完成, 客户端只需声明.
+    // 仅对 DeepSeek 官方模型 (deepseek-flash) 生效, 直连或网关透传均可.
+    Text(
+        text = "DeepSeek 联网工具 (服务端, 仅 deepseek-flash)",
+        style = MaterialTheme.typography.titleSmall,
+        modifier = Modifier.padding(top = 8.dp)
+    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("联网搜索 (deepseek_web_search)", modifier = Modifier.weight(1f))
+        Checkbox(
+            checked = provider.deepseekWebSearch,
+            onCheckedChange = {
+                onEdit(provider.copy(deepseekWebSearch = it))
+            }
+        )
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("阅读链接 (deepseek_read_url)", modifier = Modifier.weight(1f))
+        Checkbox(
+            checked = provider.deepseekReadUrl,
+            onCheckedChange = {
+                onEdit(provider.copy(deepseekReadUrl = it))
             }
         )
     }

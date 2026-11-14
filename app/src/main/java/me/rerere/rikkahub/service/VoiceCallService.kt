@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.asr.appendAmplitude
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.VOICE_CALL_NOTIFICATION_CHANNEL_ID
@@ -246,7 +247,11 @@ class VoiceCallService : Service(), KoinComponent {
                 // Service 自己订阅 asr.state, 同步振幅数据 + 捕获底层 ASR 错误
                 launch {
                     asr.state.collect { asrState ->
-                        updateAmplitudes(asrState.amplitudes)
+                        // Speaking 期间振幅由 TTS 播放侧提供 (见下方 tts.audioAmplitude 订阅),
+                        // 不再覆盖成 ASR 的旧数据 — 之前 AI 说话时音波冻住/乱跳就是这两路混用导致.
+                        if (_uiState.value.status != VoiceCallStatus.Speaking) {
+                            updateAmplitudes(asrState.amplitudes)
+                        }
                         if (asrState.status == me.rerere.asr.ASRStatus.Error) {
                             val msg = asrState.errorMessage ?: "语音识别发生未知错误"
                             Log.e(TAG, "ASR 底层报错, conversationId=$conversationId, msg=$msg")
@@ -271,6 +276,20 @@ class VoiceCallService : Service(), KoinComponent {
                                     status = VoiceCallStatus.Error,
                                     errorMessage = "语音识别错误: $msg"
                                 )
+                            }
+                        }
+                    }
+                }
+
+                // 订阅 TTS 播放振幅: AI 说话时音波按正在播放的音频真实 RMS 起伏.
+                // AudioPlayer 入队每个分片时预计算了 50ms 一窗的振幅表, 播放时按
+                // currentPosition 实时吐出当前值, 这里滚动进 uiState.amplitudes
+                // (32 条环形缓冲, 与 ASR 侧一致), 供 VoiceOrb / WaveformBars 使用.
+                launch {
+                    tts.audioAmplitude.collect { amp ->
+                        if (_uiState.value.status == VoiceCallStatus.Speaking) {
+                            _uiState.update {
+                                it.copy(amplitudes = it.amplitudes.appendAmplitude(amp))
                             }
                         }
                     }

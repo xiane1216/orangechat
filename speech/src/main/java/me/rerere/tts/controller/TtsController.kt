@@ -85,6 +85,10 @@ class TtsController(
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
 
+    /** 当前播放音频的实时振幅 (0f~1f), 语音通话音波起伏的数据源 */
+    val audioAmplitude: StateFlow<Float>
+        get() = audio.amplitude
+
     init {
         // 同步底层播放器状态到统一状态，并补充分片信息
         scope.launch {

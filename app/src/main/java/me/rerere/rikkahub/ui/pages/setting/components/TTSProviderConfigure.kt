@@ -63,6 +63,7 @@ fun TTSProviderConfigure(
                         is TTSProviderSetting.XAI -> "xAI"
                         is TTSProviderSetting.MiMo -> "MiMo"
                         is TTSProviderSetting.ElevenLabs -> "ElevenLabs"
+                        is TTSProviderSetting.DeepSeek -> "DeepSeek"
                     },
                     onValueChange = {},
                     readOnly = true,
@@ -91,6 +92,7 @@ fun TTSProviderConfigure(
                                         TTSProviderSetting.XAI::class -> "xAI"
                                         TTSProviderSetting.MiMo::class -> "MiMo"
                                         TTSProviderSetting.ElevenLabs::class -> "ElevenLabs"
+                                        TTSProviderSetting.DeepSeek::class -> "DeepSeek"
                                         else -> providerClass.simpleName ?: "Unknown"
                                     }
                                 )
@@ -143,6 +145,11 @@ fun TTSProviderConfigure(
                                         name = "ElevenLabs TTS"
                                     )
 
+                                    TTSProviderSetting.DeepSeek::class -> TTSProviderSetting.DeepSeek(
+                                        id = setting.id,
+                                        name = "DeepSeek TTS"
+                                    )
+
                                     else -> setting
                                 }
                                 onValueChange(newSetting)
@@ -179,6 +186,7 @@ fun TTSProviderConfigure(
             is TTSProviderSetting.XAI -> XAITTSConfiguration(setting, onValueChange)
             is TTSProviderSetting.MiMo -> MiMoTTSConfiguration(setting, onValueChange)
             is TTSProviderSetting.ElevenLabs -> ElevenLabsTTSConfiguration(setting, onValueChange)
+            is TTSProviderSetting.DeepSeek -> DeepSeekTTSConfiguration(setting, onValueChange)
         }
     }
 }
@@ -1101,5 +1109,129 @@ private fun ElevenLabsTTSConfiguration(
             modifier = Modifier.fillMaxWidth(),
             label = stringResource(R.string.setting_tts_page_similarity_boost)
         )
+    }
+}
+
+@Composable
+private fun DeepSeekTTSConfiguration(
+    setting: TTSProviderSetting.DeepSeek,
+    onValueChange: (TTSProviderSetting) -> Unit
+) {
+    // API Key
+    FormItem(
+        label = { Text(stringResource(R.string.setting_tts_page_api_key)) },
+        description = { Text(stringResource(R.string.setting_tts_page_api_key_description)) }
+    ) {
+        OutlinedTextField(
+            value = setting.apiKey,
+            onValueChange = { newApiKey ->
+                onValueChange(setting.copy(apiKey = newApiKey))
+            },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("sk-xxx") },
+        )
+    }
+
+    // Base URL
+    FormItem(
+        label = { Text(stringResource(R.string.setting_tts_page_base_url)) },
+        description = { Text(stringResource(R.string.setting_tts_page_base_url_description)) }
+    ) {
+        OutlinedTextField(
+            value = setting.baseUrl,
+            onValueChange = { newBaseUrl ->
+                onValueChange(setting.copy(baseUrl = newBaseUrl))
+            },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("https://api.deepseek.com/v1") }
+        )
+    }
+
+    // Voice ID: stella (女, 默认) / tide (男)
+    var voiceExpanded by remember { mutableStateOf(false) }
+    val voices = listOf(
+        "stella" to "Stella (女声, 默认)",
+        "tide" to "Tide (男声)"
+    )
+
+    FormItem(
+        label = { Text(stringResource(R.string.setting_tts_page_voice)) },
+        description = { Text(stringResource(R.string.setting_tts_page_voice_description)) }
+    ) {
+        ExposedDropdownMenuBox(
+            expanded = voiceExpanded,
+            onExpandedChange = { voiceExpanded = !voiceExpanded }
+        ) {
+            OutlinedTextField(
+                value = setting.voiceId,
+                onValueChange = { newVoiceId ->
+                    onValueChange(setting.copy(voiceId = newVoiceId))
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(MenuAnchorType.PrimaryEditable),
+                trailingIcon = {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = voiceExpanded)
+                }
+            )
+            ExposedDropdownMenu(
+                expanded = voiceExpanded,
+                onDismissRequest = { voiceExpanded = false }
+            ) {
+                voices.forEach { (voiceId, description) ->
+                    DropdownMenuItem(
+                        text = { Text(description) },
+                        onClick = {
+                            voiceExpanded = false
+                            onValueChange(setting.copy(voiceId = voiceId))
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    // Audio Format: wav / pcm
+    var formatExpanded by remember { mutableStateOf(false) }
+    val formats = listOf(
+        "wav" to "WAV (推荐)",
+        "pcm" to "PCM (裸流, 24kHz 16bit)"
+    )
+
+    FormItem(
+        label = { Text("音频格式") },
+        description = { Text("DeepSeek TTS 返回的音频格式") }
+    ) {
+        ExposedDropdownMenuBox(
+            expanded = formatExpanded,
+            onExpandedChange = { formatExpanded = !formatExpanded }
+        ) {
+            OutlinedTextField(
+                value = setting.audioFormat,
+                onValueChange = { newFormat ->
+                    onValueChange(setting.copy(audioFormat = newFormat))
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(MenuAnchorType.PrimaryEditable),
+                trailingIcon = {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = formatExpanded)
+                }
+            )
+            ExposedDropdownMenu(
+                expanded = formatExpanded,
+                onDismissRequest = { formatExpanded = false }
+            ) {
+                formats.forEach { (format, description) ->
+                    DropdownMenuItem(
+                        text = { Text(description) },
+                        onClick = {
+                            formatExpanded = false
+                            onValueChange(setting.copy(audioFormat = format))
+                        }
+                    )
+                }
+            }
+        }
     }
 }

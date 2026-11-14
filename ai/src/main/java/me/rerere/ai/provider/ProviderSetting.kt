@@ -70,6 +70,11 @@ sealed class ProviderSetting {
         var baseUrl: String = "https://api.openai.com/v1",
         var chatCompletionsPath: String = "/chat/completions",
         var useResponseApi: Boolean = false,
+        // DeepSeek 服务端联网工具 (搜索/抓取都在 DeepSeek 服务器完成, 客户端无需执行任何工具).
+        // 仅对 deepseek-flash 等官方模型生效; 开关只是往 tools 里声明, 不声明不扣费.
+        // 文档: https://api-docs.deepseek.com/zh-cn/guides/web_tools
+        var deepseekWebSearch: Boolean = false,
+        var deepseekReadUrl: Boolean = false,
     ) : ProviderSetting() {
         override fun addModel(model: Model): ProviderSetting {
             return copy(models = models + model)

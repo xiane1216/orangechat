@@ -60,12 +60,175 @@ class AudioPlayer(context: Context) {
     companion object {
         /** 分片之间的句间换气静音时长 (微秒), 120ms */
         private const val INTER_CHUNK_SILENCE_US = 120_000L
+
+        /** 振幅计算窗口: 每 50ms 一个 RMS 值 */
+        private const val AMPLITUDE_WINDOW_MS = 50L
     }
 
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
 
     private var positionJob: Job? = null
+
+    // region 播放振幅 (语音通话 AI 说话时音波起伏的数据源)
+    //
+    // 之前 Speaking 状态下音波冻住: TTS 侧没有任何实时振幅输出, UI 只能拿 ASR
+    // 的旧数据或模拟波形. 现在每个分片入队时对音频预计算 RMS 振幅表 (50ms 一窗),
+    // 播放时按 player.currentPosition 实时查出当前振幅.
+    //
+    // 时间轴按入队顺序累计: 音频分片与句间静音各占一个条目, startMs 顺次累加,
+    // 与 ExoPlayer 播放列表的时间线一一对应.
+    private class TimelineEntry(
+        val startMs: Long,
+        val durationMs: Long,
+        val amplitudes: List<Float>? // null = 句间静音占位
+    )
+
+    private val timeline = Collections.synchronizedList(mutableListOf<TimelineEntry>())
+    private var timelineDurationMs = 0L
+
+    private val _amplitude = MutableStateFlow(0f)
+
+    /** 当前播放位置的实时振幅 (0f~1f), 未播放/播完时为 0f */
+    val amplitude: StateFlow<Float> = _amplitude.asStateFlow()
+
+    private class PcmInfo(
+        val data: ByteArray,
+        val sampleRate: Int,
+        val channels: Int,
+        val bitsPerSample: Int
+    )
+
+    /** 解析音频为 PCM 信息: PCM 格式直接用, WAV 解析 RIFF 头, 失败时按裸 PCM 兜底 */
+    private fun extractPcm(bytes: ByteArray, format: AudioFormat, fallbackSampleRate: Int): PcmInfo {
+        if (format == AudioFormat.PCM) {
+            return PcmInfo(bytes, fallbackSampleRate, 1, 16)
+        }
+        return parseWavPcm(bytes) ?: PcmInfo(bytes, fallbackSampleRate, 1, 16)
+    }
+
+    /** 解析 RIFF WAV, 取 fmt 与 data chunk; 解析失败返回 null */
+    private fun parseWavPcm(wav: ByteArray): PcmInfo? {
+        return try {
+            if (wav.size < 44) return null
+            if (String(wav, 0, 4, Charsets.US_ASCII) != "RIFF") return null
+            var offset = 12
+            var sampleRate = 24000
+            var channels = 1
+            var bitsPerSample = 16
+            var pcm: ByteArray? = null
+            while (offset + 8 <= wav.size) {
+                val chunkId = String(wav, offset, 4, Charsets.US_ASCII)
+                val chunkSize = readIntLE(wav, offset + 4)
+                if (chunkSize < 0) return null // 损坏的 chunk 头, 防止死循环
+                val dataStart = offset + 8
+                when (chunkId) {
+                    "fmt " -> {
+                        channels = readShortLE(wav, dataStart + 2).toInt().coerceAtLeast(1)
+                        sampleRate = readIntLE(wav, dataStart + 4)
+                        bitsPerSample = readShortLE(wav, dataStart + 14).toInt()
+                    }
+                    "data" -> {
+                        val end = minOf(dataStart + chunkSize, wav.size)
+                        if (end > dataStart) pcm = wav.copyOfRange(dataStart, end)
+                    }
+                }
+                if (pcm != null && sampleRate > 0) break
+                offset = dataStart + chunkSize + (chunkSize % 2)
+            }
+            PcmInfo(
+                data = pcm ?: return null,
+                sampleRate = sampleRate.coerceIn(4000, 192000),
+                channels = channels,
+                bitsPerSample = bitsPerSample.takeIf { it in setOf(8, 16, 24, 32) } ?: 16
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun readIntLE(data: ByteArray, offset: Int): Int {
+        return (data[offset].toInt() and 0xFF) or
+            ((data[offset + 1].toInt() and 0xFF) shl 8) or
+            ((data[offset + 2].toInt() and 0xFF) shl 16) or
+            ((data[offset + 3].toInt() and 0xFF) shl 24)
+    }
+
+    private fun readShortLE(data: ByteArray, offset: Int): Short {
+        return ((data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)).toShort()
+    }
+
+    /** 与 asr.calculateRmsAmplitude 相同的映射: -60dB~0dB -> 0f~1f (仅支持 16bit) */
+    private fun rmsAmplitude(data: ByteArray, offset: Int, length: Int): Float {
+        val shorts = java.nio.ByteBuffer.wrap(data, offset, length)
+            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            .asShortBuffer()
+        val count = shorts.remaining()
+        if (count == 0) return 0f
+        var sum = 0.0
+        for (i in 0 until count) {
+            val s = shorts[i].toDouble()
+            sum += s * s
+        }
+        val rms = kotlin.math.sqrt(sum / count)
+        val linear = (rms / Short.MAX_VALUE).toFloat()
+        if (linear < 1e-6f) return 0f
+        val db = 20f * kotlin.math.log10(linear)
+        return ((db + 60f) / 60f).coerceIn(0f, 1f)
+    }
+
+    private fun computeWindowAmplitudes(pcm: PcmInfo): List<Float> {
+        if (pcm.bitsPerSample != 16) return emptyList()
+        val frameBytes = 2 * pcm.channels
+        val windowBytes = (pcm.sampleRate * frameBytes * AMPLITUDE_WINDOW_MS / 1000).toInt()
+            .coerceAtLeast(frameBytes)
+        val amps = ArrayList<Float>(pcm.data.size / windowBytes + 1)
+        var offset = 0
+        while (offset < pcm.data.size) {
+            val len = minOf(windowBytes, pcm.data.size - offset)
+            amps.add(rmsAmplitude(pcm.data, offset, len))
+            offset += len
+        }
+        return amps
+    }
+
+    private fun appendTimelineEntry(response: TTSResponse) {
+        val pcm = extractPcm(response.audioData, response.format, response.sampleRate ?: 24000)
+        val amps = computeWindowAmplitudes(pcm)
+        val frameBytes = pcm.bitsPerSample / 8 * pcm.channels
+        val durationMs = if (frameBytes > 0) {
+            pcm.data.size * 1000L / (pcm.sampleRate * frameBytes)
+        } else 0L
+        synchronized(timeline) {
+            timeline.add(TimelineEntry(timelineDurationMs, durationMs, amps))
+            timelineDurationMs += durationMs
+        }
+    }
+
+    private fun appendSilenceTimelineEntry(durationMs: Long) {
+        synchronized(timeline) {
+            timeline.add(TimelineEntry(timelineDurationMs, durationMs, null))
+            timelineDurationMs += durationMs
+        }
+    }
+
+    private fun amplitudeAt(positionMs: Long): Float {
+        synchronized(timeline) {
+            for (i in timeline.indices.reversed()) {
+                val entry = timeline[i]
+                if (positionMs >= entry.startMs) {
+                    val amps = entry.amplitudes ?: return 0f
+                    if (amps.isEmpty()) return 0f
+                    val idx = ((positionMs - entry.startMs) / AMPLITUDE_WINDOW_MS)
+                        .toInt().coerceIn(0, amps.size - 1)
+                    return amps[idx]
+                }
+            }
+            return 0f
+        }
+    }
+
+    // endregion
 
     // 与播放列表中的 media item 一一对应的完成信号
     private val pendingItems = Collections.synchronizedList(mutableListOf<CompletableDeferred<Unit>>())
@@ -171,6 +334,8 @@ class AudioPlayer(context: Context) {
             player.addMediaSource(mediaSource)
             player.prepare()
             player.play()
+            // 新队列从头播, 振幅时间轴从 0 重新累计
+            appendTimelineEntry(response)
         } else {
             // 正在播放: 先垫一段静音再追加音频, 自然换气
             synchronized(pendingItems) {
@@ -184,6 +349,9 @@ class AudioPlayer(context: Context) {
             )
             player.addMediaSource(mediaSource)
             player.play()
+            // 振幅时间轴同步登记: 静音占位 + 本分片
+            appendSilenceTimelineEntry(INTER_CHUNK_SILENCE_US / 1000)
+            appendTimelineEntry(response)
         }
 
         _playbackState.update {
@@ -267,6 +435,12 @@ class AudioPlayer(context: Context) {
             pendingItems.clear()
             completedCount = 0
         }
+        // 振幅时间轴一并清空 (新队列/停止/清空/释放都会走到这里)
+        synchronized(timeline) {
+            timeline.clear()
+            timelineDurationMs = 0L
+        }
+        _amplitude.value = 0f
     }
 
     // endregion
@@ -275,13 +449,16 @@ class AudioPlayer(context: Context) {
         if (positionJob?.isActive == true) return
         positionJob = scope.launch(Dispatchers.Main.immediate) {
             while (true) {
+                val position = player.currentPosition
                 _playbackState.update {
                     it.copy(
-                        positionMs = player.currentPosition,
+                        positionMs = position,
                         durationMs = if (player.duration > 0) player.duration else it.durationMs
                     )
                 }
-                delay(100)
+                // 同步刷新当前振幅 (50ms 一拍, 与振幅窗口一致)
+                _amplitude.value = amplitudeAt(position)
+                delay(50)
             }
         }
     }
@@ -289,6 +466,7 @@ class AudioPlayer(context: Context) {
     private fun stopPositionUpdates() {
         positionJob?.cancel()
         positionJob = null
+        _amplitude.value = 0f
     }
 
     private fun pcmToWav(

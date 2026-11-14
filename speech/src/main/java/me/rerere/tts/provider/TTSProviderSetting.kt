@@ -213,6 +213,34 @@ sealed class TTSProviderSetting {
         }
     }
 
+    /**
+     * DeepSeek TTS (POST {baseUrl}/tools/tts)。
+     * 返回流式 audio/wav (16bit mono 24kHz) 或裸 PCM。
+     * voice_id: stella(女, 默认) / tide(男); filter_markdown 默认 true。
+     * 官方文档: https://api-docs.deepseek.com/zh-cn/api/tts
+     */
+    @Serializable
+    @SerialName("deepseek")
+    data class DeepSeek(
+        override var id: Uuid = Uuid.random(),
+        override var name: String = "DeepSeek TTS",
+        val apiKey: String = "",
+        val baseUrl: String = "https://api.deepseek.com/v1",
+        val voiceId: String = "stella",
+        val audioFormat: String = "wav",
+        val filterMarkdown: Boolean = true,
+    ) : TTSProviderSetting() {
+        override fun copyProvider(
+            id: Uuid,
+            name: String,
+        ): TTSProviderSetting {
+            return this.copy(
+                id = id,
+                name = name,
+            )
+        }
+    }
+
     companion object {
         val Types by lazy {
             listOf(
@@ -225,6 +253,7 @@ sealed class TTSProviderSetting {
                 XAI::class,
                 MiMo::class,
                 ElevenLabs::class,
+                DeepSeek::class,
             )
         }
     }

@@ -88,6 +88,9 @@ interface CustomTtsState {
     val totalChunks: StateFlow<Int>
     val playbackState: StateFlow<PlaybackState>
 
+    /** 当前播放音频的实时振幅 (0f~1f), 语音通话 AI 说话时音波起伏的数据源 */
+    val audioAmplitude: StateFlow<Float>
+
     fun speak(text: String, flushCalled: Boolean = true)
     fun stop()
     fun pause()
@@ -135,6 +138,7 @@ internal class CustomTtsStateImpl(
     override val currentChunk: StateFlow<Int> get() = controller.currentChunk
     override val totalChunks: StateFlow<Int> get() = controller.totalChunks
     override val playbackState: StateFlow<PlaybackState> get() = controller.playbackState
+    override val audioAmplitude: StateFlow<Float> get() = controller.audioAmplitude
 
     fun updateProvider(provider: TTSProviderSetting?) {
         controller.setProvider(provider)

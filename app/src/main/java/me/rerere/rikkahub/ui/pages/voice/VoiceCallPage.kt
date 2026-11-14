@@ -480,8 +480,9 @@ private fun CallAvatar(
 /**
  * 竖条音波 (仅 AI 说话时起伏)
  *
- * Speaking 期间 TTS 侧没有实时振幅数据 (amplitudes 来自 ASR), 若直接用
- * 旧数据波形会冻住. 这里在激活且无振幅时用无限动画模拟起伏.
+ * amplitudes 现在来自 TTS 播放侧的真实音频 RMS (AudioPlayer 预计算振幅表,
+ * VoiceCallService 在 Speaking 期间滚动写入), 音波随 AI 实际发出的声音起伏.
+ * 仅有振幅数据缺失时 (如系统 TTS) 才退回无限动画模拟.
  */
 @Composable
 private fun WaveformBars(
