@@ -557,10 +557,13 @@ class ChatCompletionsAPI(
             // DeepSeek 服务端联网工具 (deepseek_web_search / deepseek_read_url):
             // 搜索和抓取都在 DeepSeek 服务端完成, 客户端只需在 tools 里声明, 无需执行任何工具.
             // 与本地 function tools 共存于同一个 tools 数组.
-            // 文档: https://api-docs.deepseek.com/zh-cn/guides/web_tools
+            // 官方文档: https://api-docs.deepseek.com/zh-cn/guides/web_tools
+            // 注意: 服务端联网工具官方仅支持 deepseek-flash, 其他模型 (如 pro) 不支持
+            // 工具声明 — 静默跳过, 避免勾着开关用 pro 聊天时请求直接 400.
+            val isDeepseekFlash = params.model.modelId.contains("flash")
             val deepseekServerTools = buildList {
-                if (providerSetting.deepseekWebSearch) add("deepseek_web_search")
-                if (providerSetting.deepseekReadUrl) add("deepseek_read_url")
+                if (providerSetting.deepseekWebSearch && isDeepseekFlash) add("deepseek_web_search")
+                if (providerSetting.deepseekReadUrl && isDeepseekFlash) add("deepseek_read_url")
             }
             val hasFunctionTools = params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
             if (hasFunctionTools || deepseekServerTools.isNotEmpty()) {
