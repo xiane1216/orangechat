@@ -64,3 +64,24 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
     flushThinkingSteps()
     return result
 }
+
+/**
+ * 消息当前是否有任何可见输出 (思考 / 工具 / 正文文本 / 媒体附件)。
+ * 用于判断正在生成的 assistant 消息是否需要显示等待跳点:
+ * 无可见输出时显示三粉点, 一旦有输出立即切换为实际内容渲染。
+ * Quote 不算可见输出 (它只渲染在正文气泡内部)。
+ */
+internal fun List<UIMessagePart>.hasVisibleOutput(): Boolean {
+    return any { part ->
+        when (part) {
+            is UIMessagePart.Reasoning, is UIMessagePart.Tool -> true
+            is UIMessagePart.Text -> part.text.isNotBlank()
+            is UIMessagePart.Image,
+            is UIMessagePart.Video,
+            is UIMessagePart.Audio,
+            is UIMessagePart.VoiceMessage,
+            is UIMessagePart.Document -> true
+            else -> false
+        }
+    }
+}

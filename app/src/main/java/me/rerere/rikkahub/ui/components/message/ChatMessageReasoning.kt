@@ -219,17 +219,6 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     val customThinkingColor = LocalDisplaySettings.current.thinkingTextColor?.let { it.toComposeColor() }
     val headerColor = customThinkingColor ?: MaterialTheme.colorScheme.onSurfaceVariant
     val heartColor = customThinkingColor ?: Color(0xFFD3A9A3)
-    // 生成中: 心形心跳缩放动画
-    val heartTransition = rememberInfiniteTransition(label = "thinkingHeart")
-    val heartScale by heartTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.25f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "thinkingHeartScale",
-    )
     // 头部字号跟随全局字号比例
     val headerFontSize = 12.sp * LocalDisplaySettings.current.fontSizeRatio
 
@@ -237,17 +226,12 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
         onExpandedChange = { state.onExpandedChange(it, loading) },
         icon = {
-            // Lucide 描边爱心 (镂空字形), 替代 Unicode "♡" 避免被中文字体渲染成实心
-            Icon(
-                imageVector = Lucide.Heart,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(13.dp)
-                    .graphicsLayer {
-                        scaleX = if (loading) heartScale else 1f
-                        scaleY = if (loading) heartScale else 1f
-                    },
+            // Lucide 描边爱心 (镂空字形); 心跳动画隔离在 ThinkingHeartIcon 内部,
+            // 只有心形图标自己参与动画, 不会带动思考链行/消息列表重组
+            ThinkingHeartIcon(
+                loading = loading,
                 tint = heartColor,
+                modifier = Modifier.size(13.dp),
             )
         },
         label = {
@@ -275,5 +259,45 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 thinkingColor = customThinkingColor,
             )
         },
+    )
+}
+
+// 思考步骤心形图标: 心跳缩放动画被隔离在这个最小 composable 里,
+// 动画值只在 graphicsLayer (绘制阶段) 读取, 不会向上扩散引起思考链行/消息列表重组;
+// 非生成中不创建无限动画, 避免历史消息的心形一直空转消耗帧
+@Composable
+private fun ThinkingHeartIcon(
+    loading: Boolean,
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    if (!loading) {
+        Icon(
+            imageVector = Lucide.Heart,
+            contentDescription = null,
+            modifier = modifier,
+            tint = tint,
+        )
+        return
+    }
+    // 生成中: 心形心跳缩放动画
+    val heartTransition = rememberInfiniteTransition(label = "thinkingHeart")
+    val heartScale by heartTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "thinkingHeartScale",
+    )
+    Icon(
+        imageVector = Lucide.Heart,
+        contentDescription = null,
+        modifier = modifier.graphicsLayer {
+            scaleX = heartScale
+            scaleY = heartScale
+        },
+        tint = tint,
     )
 }

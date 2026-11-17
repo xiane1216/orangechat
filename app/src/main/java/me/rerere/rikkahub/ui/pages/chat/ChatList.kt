@@ -18,10 +18,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -110,7 +107,6 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.toJavaLocalDateTime
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -119,6 +115,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.ui.components.message.BouncingLoadingDots
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.message.ChatMessageSideAvatar
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
@@ -324,46 +321,28 @@ private fun ChatListNormal(
 
         // Filter out [SKIP] messages and proactive/heartbeat synthetic context markers.
         // 心跳触发的合成 USER 消息标记是 "[心跳检查上下文]" (主动消息是 "[主动消息上下文]"),
-        // 漏过滤会让心跳回复前的合成触发消息以用户气泡混进列表, 导致心跳 assistant 组头像错位缺失
-        val displayNodes = remember(conversation.messageNodes) {
-            conversation.messageNodes.filter { node ->
-                val msg = node.currentMessage
-                val text = msg.toText().trim()
-                val isSyntheticTrigger = msg.role == MessageRole.USER && (
-                    text.contains("[主动消息上下文]") ||
-                        text.contains("[心跳检查上下文]") ||
-                        text.startsWith("[现在是")
-                    )
-                !(msg.role == MessageRole.ASSISTANT && text == "[SKIP]") && !isSyntheticTrigger
-            }
-        }
+        // 漏过滤会让心跳回复前的合成触发消息以用户气泡混进列表, 导致心跳 assistant 组头像错位缺失。
+        // 过滤结果按 "节点 id + 节点实例" 记忆: 流式时绝大多数节点引用不变直接命中缓存,
+        // 只有真正更新的那条消息 (新实例) 才重新做 toText 检查, 避免每个 token 全量扫描全部消息文本
+        val displayNodeFilter = remember { DisplayNodeFilterCache() }
+        val displayNodes = displayNodeFilter.filter(conversation.messageNodes)
 
-        // 消息分组: 相邻同角色消息合成一组再渲染 (组头一个头像, 组内气泡 2dp 间距)
-        val displayGroups = remember(displayNodes) {
-            val groups = mutableListOf<Pair<MessageRole, MutableList<MessageNode>>>()
-            displayNodes.forEach { node ->
-                val role = node.currentMessage.role
-                if (groups.isNotEmpty() && groups.last().first == role) {
-                    groups.last().second.add(node)
-                } else {
-                    groups.add(role to mutableListOf(node))
-                }
-            }
-            groups
-        }
+        // 最新节点实例索引: 流式期间会话对象每 token 都是新实例, 渲染时用它把组内的
+        // 节点 id 映射回最新 MessageNode, 保证流式内容更新直达对应消息 item
+        val latestNodeById = conversation.messageNodes.associateBy { it.id }
 
-        // 等待跳点时机: 仅在生成已开始、但最后一条 assistant 消息还没有任何可见输出
-        // (消息尚未创建 / 为空 / 没有任何思考、工具或正文内容) 时显示三粉点;
-        // 思考链行或正文一旦开始流式输出, 立即隐藏, 避免与思考链动画同时出现
-        val showWaitingDots = loading && run {
+        // 消息分组: 相邻同角色消息合成一组再渲染 (组头一个头像, 组内气泡 2dp 间距)。
+        // 分组结构只携带 "角色 + 节点 id", 不携带节点实例; 流式 token 更新不会改变
+        // id/角色序列, 组的 key/参数保持稳定, 避免每 token 全量重新分组 + 全列表深度比较
+        val displayGroups = buildGroups(displayNodes)
+
+        // 独立等待跳点 item 只在 "正在生成的 assistant 消息尚未创建" (最后一条不是 assistant,
+        // 比如用户刚发出) 时显示; 一旦 assistant 消息节点已创建 (哪怕还没有内容), 独立 item 隐藏,
+        // 三粉点改为渲染在该消息自己的内容列顶部 (见 ChatMessage 内部), 思考到达后原地变成思考行,
+        // 全程只保留组头像一个头像, 消除 "loading 头像 -> 消息头像" 的切换感
+        val showLoadingItem = loading && run {
             val lastMsg = conversation.messageNodes.lastOrNull()?.currentMessage
-            lastMsg == null ||
-                lastMsg.role != MessageRole.ASSISTANT ||
-                (
-                    lastMsg.parts.none { it is UIMessagePart.Reasoning } &&
-                        lastMsg.parts.none { it is UIMessagePart.Tool } &&
-                        lastMsg.toText().isBlank()
-                    )
+            lastMsg == null || lastMsg.role != MessageRole.ASSISTANT
         }
 
         LazyColumn(
@@ -377,15 +356,18 @@ private fun ChatListNormal(
         ) {
             itemsIndexed(
                 items = displayGroups,
-                key = { _, group -> "grp_${group.second.first().id}" },
+                key = { _, group -> "grp_${group.second.first()}" },
+                // contentType 按角色区分, 复用组合时用户/助手组各自匹配, 减少无谓的结构重建
+                contentType = { _, group -> group.first },
             ) { groupIndex, group ->
                 val isUserGroup = group.first == MessageRole.USER
-                val groupNodes = group.second
+                // 把组内节点 id 映射回最新实例, 流式更新只影响真正变化的那条消息
+                val groupNodes = group.second.mapNotNull { latestNodeById[it] }
                 val isLastGroup = groupIndex == displayGroups.lastIndex
                 val groupAssistant = settings.getAssistantById(conversation.assistantId)
-                val groupModel = remember(groupNodes, settings) {
-                    groupNodes.lastOrNull()?.currentMessage?.modelId?.let { settings.findModelById(it) }
-                }
+                // 直接计算 (不再 remember 节点列表): findModelById 是小列表查找,
+                // 比每 token 对整组节点做深度 equals 便宜得多
+                val groupModel = groupNodes.lastOrNull()?.currentMessage?.modelId?.let { settings.findModelById(it) }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -467,7 +449,8 @@ private fun ChatListNormal(
                             )
                         } else {
                             ChatGroupMetaLine(
-                                group = group,
+                                role = group.first,
+                                nodes = groupNodes,
                                 assistant = groupAssistant,
                                 settings = settings,
                             )
@@ -495,7 +478,7 @@ private fun ChatListNormal(
 
             // processingStatus 文字跟跳点同住一个 item: 跳点隐藏时 status 文字也一起消失,
             // 思考期间画面上只保留思考链动画
-            if (showWaitingDots) {
+            if (showLoadingItem) {
                 item(LoadingIndicatorKey) {
                     // 等待动画: 组结构 (AI 头像 28dp 在左 + 右侧三个 6dp 粉点跳动), 不再用兔子
                     val loadingAssistant = settings.getAssistantById(conversation.assistantId)
@@ -511,13 +494,10 @@ private fun ChatListNormal(
                         )
                         Row(
                             modifier = Modifier.padding(top = 10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // 三个 6dp 粉点上下跳 (相位差 0.15s)
-                            BouncingLoadingDot(delayMillis = 0)
-                            BouncingLoadingDot(delayMillis = 150)
-                            BouncingLoadingDot(delayMillis = 300)
+                            // 三个 6dp 粉点上下跳 (周期 1.1s, 相位差 0.15s), 与消息内等待态共用同一组件
+                            BouncingLoadingDots()
                             AnimatedVisibility(
                                 visible = processingStatus != null,
                                 modifier = Modifier.padding(start = 4.dp),
@@ -983,13 +963,14 @@ private fun BoxScope.MessageJumper(
 // 与气泡垂直间距 2dp; 字体/字号/颜色/格式保持原样不动
 @Composable
 private fun ChatGroupMetaLine(
-    group: Pair<MessageRole, List<MessageNode>>,
+    role: MessageRole,
+    nodes: List<MessageNode>,
     assistant: Assistant?,
     settings: Settings,
     modifier: Modifier = Modifier,
 ) {
-    val isUser = group.first == MessageRole.USER
-    val lastMessage = group.second.lastOrNull()?.currentMessage ?: return
+    val isUser = role == MessageRole.USER
+    val lastMessage = nodes.lastOrNull()?.currentMessage ?: return
     val fontSizeRatio = settings.displaySetting.fontSizeRatio
     val showModelName = settings.displaySetting.showModelName
     // 每次重组直接计算, 保证昵称/助手名等设置变化即时生效
@@ -1094,28 +1075,57 @@ private fun SendStateSpinner(modifier: Modifier = Modifier) {
     }
 }
 
-// 等待动画: 单个 6dp 粉点上下跳 (由 infiniteTransition 驱动, 用 StartOffset 做相位差)
-@Composable
-private fun BouncingLoadingDot(
-    delayMillis: Int,
-    modifier: Modifier = Modifier,
-) {
-    val transition = rememberInfiniteTransition(label = "bouncingDot")
-    val offsetY by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = -6f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-            initialStartOffset = StartOffset(delayMillis),
-        ),
-        label = "bouncingDotOffset",
-    )
-    Box(
-        modifier = modifier
-            .offset(y = offsetY.dp)
-            .size(6.dp)
-            .clip(CircleShape)
-            .background(Color(0xFFD3A9A3)),
-    )
+// 展示节点过滤缓存: 以 "节点 id -> (节点实例, 过滤结果)" 记忆。
+// 流式时列表里绝大多数节点是同一实例 (引用相等), 直接命中缓存跳过 toText;
+// 只有被更新重建的那条消息 (新实例) 才重新检查, 会话切换后旧条目因 id 不匹配会被覆盖
+private class DisplayNodeFilterCache {
+    private val cache = HashMap<Uuid, Pair<MessageNode, Boolean>>()
+
+    fun filter(nodes: List<MessageNode>): List<MessageNode> {
+        return nodes.filter { isDisplayed(it) }
+    }
+
+    private fun isDisplayed(node: MessageNode): Boolean {
+        cache[node.id]?.let { (cachedNode, result) ->
+            if (cachedNode === node) return result
+        }
+        val result = checkNode(node)
+        cache[node.id] = node to result
+        return result
+    }
+
+    private fun checkNode(node: MessageNode): Boolean {
+        val msg = node.currentMessage
+        val text = msg.toText().trim()
+        val isSyntheticTrigger = msg.role == MessageRole.USER && (
+            text.contains("[主动消息上下文]") ||
+                text.contains("[心跳检查上下文]") ||
+                text.startsWith("[现在是")
+            )
+        return !(msg.role == MessageRole.ASSISTANT && text == "[SKIP]") && !isSyntheticTrigger
+    }
+}
+
+// 相邻同角色节点合并为组: 组 = (角色, 该组节点 id 列表)。
+// 结构只由 id/角色这些不变量构成, 不携带节点实例, 保证流式期间组的参数稳定
+private fun buildGroups(nodes: List<MessageNode>): List<Pair<MessageRole, List<Uuid>>> {
+    val groups = mutableListOf<Pair<MessageRole, List<Uuid>>>()
+    var currentRole: MessageRole? = null
+    var currentIds = mutableListOf<Uuid>()
+    nodes.forEach { node ->
+        val role = node.currentMessage.role
+        if (role == currentRole) {
+            currentIds.add(node.id)
+        } else {
+            if (currentIds.isNotEmpty()) {
+                groups.add(currentRole!! to currentIds.toList())
+            }
+            currentRole = role
+            currentIds = mutableListOf(node.id)
+        }
+    }
+    if (currentIds.isNotEmpty()) {
+        groups.add(currentRole!! to currentIds.toList())
+    }
+    return groups
 }

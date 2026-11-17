@@ -10,8 +10,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
 import dev.chrisbanes.haze.HazeState
@@ -20,6 +23,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.ui.toComposeColor
 import me.rerere.rikkahub.ui.context.LocalDisplaySettings
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
 
 @Composable
 fun AssistantBackground(setting: Settings, hazeState: HazeState? = null) {
@@ -28,6 +32,20 @@ fun AssistantBackground(setting: Settings, hazeState: HazeState? = null) {
     val chatBackgroundColor = LocalDisplaySettings.current.chatBackgroundColor?.let { it.toComposeColor() }
     // 注册为 haze 模糊源: 气泡磨砂玻璃需要从背景图/背景色取色
     val sourceModifier = if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier
+    // 深浅色状态: RikkahubTheme 内提供, 跟随系统与手动深色模式均会生效
+    val isDarkMode = LocalDarkMode.current
+    // 深色模式聊天背景图压暗滤镜 (模仿微信: 明显变暗但壁纸仍隐约可见)
+    // 饱和度约 0.65 + 亮度约 0.6, 高光随亮度一并压低; 浅色模式不应用, 背景保持原图
+    val darkImageColorFilter = remember {
+        val matrix = ColorMatrix().apply { setToSaturation(0.65f) }
+        // 亮度矩阵为对角阵, 等价于缩放 RGB 三行的全部元素, 组合出"先降饱和再压亮度"的矩阵
+        for (row in 0 until 3) {
+            for (col in 0 until 5) {
+                matrix.values[row * 5 + col] *= 0.6f
+            }
+        }
+        ColorFilter.colorMatrix(matrix)
+    }
 
     when {
         assistant.background != null -> {
@@ -39,6 +57,8 @@ fun AssistantBackground(setting: Settings, hazeState: HazeState? = null) {
                 model = assistant.background,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                // 在 Image 层直接应用压暗滤镜, haze 磨砂采样到的也是压暗后的背景, 气泡与背景视觉统一
+                colorFilter = if (isDarkMode) darkImageColorFilter else null,
                 modifier = Modifier
                     .fillMaxSize()
                     .alpha(backgroundOpacity)

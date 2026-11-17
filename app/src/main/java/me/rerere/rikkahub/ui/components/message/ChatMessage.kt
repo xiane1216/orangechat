@@ -10,7 +10,9 @@ import android.content.Intent
 import android.media.MediaPlayer
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -28,6 +30,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -574,10 +577,16 @@ private fun MessageContentBlock(
             var menuAnchor by remember { mutableStateOf(BubbleMenuAnchor(0, 0)) }
             Box(
                 modifier = Modifier.onGloballyPositioned { coords ->
-                    menuAnchor = BubbleMenuAnchor(
-                        anchorHeightPx = coords.size.height,
-                        anchorTopPx = coords.positionInWindow().y.roundToInt(),
-                    )
+                    // 只在高度/窗口位置真正变化时写入状态: 流式期间布局回调每帧都会触发,
+                    // 无条件写入 mutableState 会让菜单锚点状态高频失效并拖慢整个消息项
+                    val anchorTopPx = coords.positionInWindow().y.roundToInt()
+                    val anchorHeightPx = coords.size.height
+                    if (menuAnchor.anchorTopPx != anchorTopPx || menuAnchor.anchorHeightPx != anchorHeightPx) {
+                        menuAnchor = BubbleMenuAnchor(
+                            anchorHeightPx = anchorHeightPx,
+                            anchorTopPx = anchorTopPx,
+                        )
+                    }
                 }
             ) {
                 SelectionContainer {
@@ -964,6 +973,47 @@ private fun StreamingCursor(modifier: Modifier = Modifier) {
     )
 }
 
+// 等待动画: 三个 6dp 粉点上下跳动 (周期 1.1s, 相位差 0.15s)。
+// ChatList 的独立等待项与消息内等待态共用, 保证两处样式完全一致
+@Composable
+internal fun BouncingLoadingDots(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BouncingLoadingDot(delayMillis = 0)
+        BouncingLoadingDot(delayMillis = 150)
+        BouncingLoadingDot(delayMillis = 300)
+    }
+}
+
+// 单个跳动粉点: 6dp 圆点, 550ms 上跳 + 550ms 回落 (一个周期 1.1s), 用 StartOffset 做相位差
+@Composable
+private fun BouncingLoadingDot(
+    delayMillis: Int,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "bouncingDot")
+    val offsetY by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = -6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(550, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+            initialStartOffset = StartOffset(delayMillis),
+        ),
+        label = "bouncingDotOffset",
+    )
+    Box(
+        modifier = modifier
+            .offset(y = offsetY.dp)
+            .size(6.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFD3A9A3)),
+    )
+}
+
 @OptIn(FlowPreview::class)
 @Composable
 private fun MessagePartsBlock(
@@ -1022,6 +1072,14 @@ private fun MessagePartsBlock(
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.KeyboardTap)
                 }
             }
+    }
+
+    // 等待跳点: 正在生成的 assistant 消息 (最后一条且生成中) 还没有任何可见输出
+    // (无思考/工具/正文文本/媒体附件) 时, 在本消息自己的内容列顶部显示三粉点;
+    // 思考/正文一旦到达, 这里立即消失, 思考链行在同一个头像列原地出现。
+    // 独立 loading item 此时已隐藏 (见 ChatList), 保证 "等待 -> 思考 -> 正文" 全程只有一个头像
+    if (showStreamingCursor && role == MessageRole.ASSISTANT && !parts.hasVisibleOutput()) {
+        BouncingLoadingDots(modifier = Modifier.padding(top = 10.dp))
     }
 
     // Render parts in original order (group thinking/tool as chain-of-thought)

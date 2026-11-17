@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
@@ -225,7 +226,13 @@ fun MarkdownBlock(
             .mapLatest { parseMarkdown(it) }
             .catch { exception -> exception.printStackTrace() }
             .flowOn(Dispatchers.Default)
-            .collect { setData(it) }
+            .collect {
+                // 流式节流: 每 80ms 最多应用一次解析结果。token 高频到达期间,
+                // snapshotFlow 的 conflate 语义 + 该延迟会合并中间帧, 停止流式后
+                // 最新内容也一定会被应用 (不丢尾巴), 显著降低流式时的解析与重组频率
+                setData(it)
+                delay(80)
+            }
     }
 
     if (data.hasHtml) {
