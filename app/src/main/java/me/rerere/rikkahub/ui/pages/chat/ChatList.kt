@@ -107,6 +107,7 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.toJavaLocalDateTime
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -368,12 +369,17 @@ private fun ChatListNormal(
                 // 直接计算 (不再 remember 节点列表): findModelById 是小列表查找,
                 // 比每 token 对整组节点做深度 equals 便宜得多
                 val groupModel = groupNodes.lastOrNull()?.currentMessage?.modelId?.let { settings.findModelById(it) }
+                // 组内消息用到了工具时, 消息内部会按阶段(思考/工具/回复)各带一个分头像,
+                // 此时组级头像不再重复绘制, 否则会出现两个头像并排
+                val groupHasToolParts = !isUserGroup && groupNodes.any { node ->
+                    node.currentMessage.parts.any { it is UIMessagePart.Tool }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    // AI 组头像在左 (所有 assistant 消息组一律带头像), 用户组头像在右
-                    if (!isUserGroup) {
+                    // AI 组头像在左 (未分阶段头像的 assistant 组一律带头像), 用户组头像在右
+                    if (!isUserGroup && !groupHasToolParts) {
                         ChatMessageSideAvatar(
                             isUser = false,
                             model = groupModel,
