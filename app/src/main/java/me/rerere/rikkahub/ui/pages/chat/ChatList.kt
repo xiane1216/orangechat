@@ -459,6 +459,9 @@ private fun ChatListNormal(
                                 nodes = groupNodes,
                                 assistant = groupAssistant,
                                 settings = settings,
+                                // 分阶段头像模式下(组内有工具), 头像由阶段块自己绘制,
+                                // meta 行需补一个头像宽度的左偏移, 否则会贴到头像列位置
+                                startPadding = if (groupHasToolParts) (28 + 8).dp else 0.dp,
                             )
                         }
                     }
@@ -973,6 +976,7 @@ private fun ChatGroupMetaLine(
     nodes: List<MessageNode>,
     assistant: Assistant?,
     settings: Settings,
+    startPadding: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     val isUser = role == MessageRole.USER
@@ -994,7 +998,9 @@ private fun ChatGroupMetaLine(
     val metaText = if (name != null) "$name · $timeText" else timeText
     Row(
         // 与气泡的 2dp 垂直间距由父级 Column 的 spacedBy(2.dp) 提供, 这里不再叠加 padding
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = startPadding),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
         Text(
