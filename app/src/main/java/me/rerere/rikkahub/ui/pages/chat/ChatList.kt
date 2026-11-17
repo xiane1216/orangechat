@@ -349,7 +349,10 @@ private fun ChatListNormal(
 
         LazyColumn(
             state = state,
-            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
+            // 水平 6dp: AI 组 (头像+气泡+思考链+小字) 整体贴左, 用户组整体贴右, 像微信那样
+            // 靠边但留一点缝隙; 组是 fillMaxWidth 的整体, 收窄边距即整组平移
+            contentPadding = PaddingValues(start = 6.dp, end = 6.dp) +
+                PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
@@ -358,23 +361,21 @@ private fun ChatListNormal(
         ) {
             itemsIndexed(
                 items = displayGroups,
-                key = { _, group -> "grp_${group.second.first()}" },
+                key = { _, group -> "grp_${group.ids.first()}" },
                 // contentType 按角色区分, 复用组合时用户/助手组各自匹配, 减少无谓的结构重建
-                contentType = { _, group -> group.first },
+                contentType = { _, group -> group.role },
             ) { groupIndex, group ->
-                val isUserGroup = group.first == MessageRole.USER
+                val isUserGroup = group.role == MessageRole.USER
                 // 把组内节点 id 映射回最新实例, 流式更新只影响真正变化的那条消息
-                val groupNodes = group.second.mapNotNull { latestNodeById[it] }
+                val groupNodes = group.ids.mapNotNull { latestNodeById[it] }
                 val isLastGroup = groupIndex == displayGroups.lastIndex
                 val groupAssistant = settings.getAssistantById(conversation.assistantId)
                 // 直接计算 (不再 remember 节点列表): findModelById 是小列表查找,
                 // 比每 token 对整组节点做深度 equals 便宜得多
                 val groupModel = groupNodes.lastOrNull()?.currentMessage?.modelId?.let { settings.findModelById(it) }
-                // 组内消息用到了工具时, 消息内部会按阶段(思考/工具/回复)各带一个分头像,
-                // 此时组级头像不再重复绘制, 否则会出现两个头像并排
-                val groupHasToolParts = !isUserGroup && groupNodes.any { node ->
-                    node.currentMessage.parts.any { it is UIMessagePart.Tool }
-                }
+                // 带工具的 AI 消息在分组时已独立成组 (buildGroups), 渲染时组级头像不画,
+                // 由消息内部分阶段(思考/工具/回复)头像接管, 避免两个头像并排
+                val groupHasToolParts = !isUserGroup && group.hasTool
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -456,7 +457,7 @@ private fun ChatListNormal(
                             )
                         } else {
                             ChatGroupMetaLine(
-                                role = group.first,
+                                role = group.role,
                                 nodes = groupNodes,
                                 assistant = groupAssistant,
                                 settings = settings,
@@ -1119,26 +1120,38 @@ private class DisplayNodeFilterCache {
     }
 }
 
-// 相邻同角色节点合并为组: 组 = (角色, 该组节点 id 列表)。
-// 结构只由 id/角色这些不变量构成, 不携带节点实例, 保证流式期间组的参数稳定
-private fun buildGroups(nodes: List<MessageNode>): List<Pair<MessageRole, List<Uuid>>> {
-    val groups = mutableListOf<Pair<MessageRole, List<Uuid>>>()
+// 消息组: 角色相同的相邻消息合并, 额外按 "是否带工具调用" 细分。
+// 带 Tool 的 AI 消息必须独立成组: 这类组不画组级头像 (由消息内部分阶段头像接管),
+// 若与普通消息混在一组, 普通消息会因组头像被抑制而失去头像 (心跳主动消息无头像的根因)。
+// 结构只由 id/角色/工具标记这些不变量构成, 不携带节点实例, 保证流式期间组的参数稳定
+data class ChatDisplayGroup(
+    val role: MessageRole,
+    val hasTool: Boolean,
+    val ids: List<Uuid>,
+)
+
+private fun buildGroups(nodes: List<MessageNode>): List<ChatDisplayGroup> {
+    val groups = mutableListOf<ChatDisplayGroup>()
     var currentRole: MessageRole? = null
+    var currentHasTool = false
     var currentIds = mutableListOf<Uuid>()
+    fun flush() {
+        if (currentIds.isNotEmpty()) {
+            groups.add(ChatDisplayGroup(currentRole!!, currentHasTool, currentIds.toList()))
+        }
+    }
     nodes.forEach { node ->
         val role = node.currentMessage.role
-        if (role == currentRole) {
+        val hasTool = node.currentMessage.parts.any { it is UIMessagePart.Tool }
+        if (role == currentRole && hasTool == currentHasTool) {
             currentIds.add(node.id)
         } else {
-            if (currentIds.isNotEmpty()) {
-                groups.add(currentRole!! to currentIds.toList())
-            }
+            flush()
             currentRole = role
+            currentHasTool = hasTool
             currentIds = mutableListOf(node.id)
         }
     }
-    if (currentIds.isNotEmpty()) {
-        groups.add(currentRole!! to currentIds.toList())
-    }
+    flush()
     return groups
 }
