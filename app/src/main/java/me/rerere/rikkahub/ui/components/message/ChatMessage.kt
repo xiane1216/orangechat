@@ -890,79 +890,118 @@ private fun MessagePartsBlock(
     val groupedParts = remember(parts) { parts.groupMessageParts() }
     // 气泡最大宽度: 0.75 屏宽
     val maxBubbleWidth = (LocalConfiguration.current.screenWidthDp * 0.75).dp
+    // 分头像规则: 只有消息里实际用了工具时才分阶段头像 (思考/工具/回复各带一个);
+    // 普通回复 (思考+正文) 一体, 全部排在组头像下方
+    val hasToolParts = remember(parts) { parts.any { it is UIMessagePart.Tool } }
+    val stageAvatar = showSideAvatar && hasToolParts
     groupedParts.fastForEachIndexed { blockIndex, block ->
-        val blockContent: @Composable () -> Unit = {
-            when (block) {
-                is MessagePartBlock.ThinkingBlock -> {
-                    if (block.steps.isNotEmpty()) {
-                        val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
-                        ChainOfThought(
-                            modifier = Modifier.animateContentSize(),
-                            steps = block.steps,
-                            collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                        ) { step ->
-                            when (step) {
-                                is ThinkingStep.ReasoningStep -> {
-                                    key(step.reasoning.createdAt) {
-                                        ChatMessageReasoningStep(
-                                            reasoning = step.reasoning,
-                                            model = model,
-                                            assistant = assistant,
-                                            collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                                        )
-                                    }
-                                }
-
-                                is ThinkingStep.ToolStep -> {
-                                    key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
-                                        ChatMessageToolStep(
-                                            tool = step.tool,
-                                            loading = loading && !step.tool.isExecuted,
-                                            allParts = parts,
-                                            onToolApproval = onToolApproval,
-                                            onToolAnswer = onToolAnswer,
-                                        )
-                                    }
+        when (block) {
+            is MessagePartBlock.ThinkingBlock -> {
+                if (block.steps.isNotEmpty()) {
+                    val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
+                    // 分头像时把思考与工具按连续段拆开, 各自带一个头像 (对应原型分阶段结构)
+                    val stageRuns = remember(block.steps) {
+                        buildList {
+                            block.steps.forEach { step ->
+                                val isReasoning = step is ThinkingStep.ReasoningStep
+                                val lastRun = lastOrNull()
+                                if (lastRun != null && lastRun.first == isReasoning) {
+                                    lastRun.second.add(step)
+                                } else {
+                                    add(isReasoning to mutableListOf(step))
                                 }
                             }
                         }
                     }
-                }
+                    val segments: List<List<ThinkingStep>> =
+                        if (stageAvatar) stageRuns.map { it.second } else listOf(block.steps)
+                    segments.forEach { steps ->
+                        val segmentContent: @Composable () -> Unit = {
+                            ChainOfThought(
+                                modifier = Modifier.animateContentSize(),
+                                steps = steps,
+                                collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                            ) { step ->
+                                when (step) {
+                                    is ThinkingStep.ReasoningStep -> {
+                                        key(step.reasoning.createdAt) {
+                                            ChatMessageReasoningStep(
+                                                reasoning = step.reasoning,
+                                                model = model,
+                                                assistant = assistant,
+                                                collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                                            )
+                                        }
+                                    }
 
-                is MessagePartBlock.ContentBlock -> key(block.index) {
-                    MessageContentBlock(
-                        block = block,
-                        role = role,
-                        assistant = assistant,
-                        parts = parts,
-                        isLastBlock = blockIndex == groupedParts.lastIndex,
-                        bubbleAlpha = bubbleAlpha,
-                        maxBubbleWidth = maxBubbleWidth,
-                        showStreamingCursor = showStreamingCursor,
-                        onBubbleClick = onBubbleClick,
-                        onBubbleLongClick = onBubbleLongClick,
-                        onClickCitation = handleClickCitation,
-                    )
+                                    is ThinkingStep.ToolStep -> {
+                                        key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
+                                            ChatMessageToolStep(
+                                                tool = step.tool,
+                                                loading = loading && !step.tool.isExecuted,
+                                                allParts = parts,
+                                                onToolApproval = onToolApproval,
+                                                onToolAnswer = onToolAnswer,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (stageAvatar) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ChatMessageSideAvatar(
+                                    isUser = false,
+                                    loading = loading,
+                                    model = model,
+                                    assistant = assistant,
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    segmentContent()
+                                }
+                            }
+                        } else {
+                            segmentContent()
+                        }
+                    }
                 }
             }
-        }
-        if (showSideAvatar) {
-            // AI 消息分头像: 每个阶段块 (思考/工具/正文气泡) 上方带一个小头像
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                ChatMessageSideAvatar(
-                    isUser = false,
-                    loading = loading,
-                    model = model,
-                    assistant = assistant,
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    blockContent()
+
+            is MessagePartBlock.ContentBlock -> {
+                val content: @Composable () -> Unit = {
+                    key(block.index) {
+                        MessageContentBlock(
+                            block = block,
+                            role = role,
+                            assistant = assistant,
+                            parts = parts,
+                            isLastBlock = blockIndex == groupedParts.lastIndex,
+                            bubbleAlpha = bubbleAlpha,
+                            maxBubbleWidth = maxBubbleWidth,
+                            showStreamingCursor = showStreamingCursor,
+                            onBubbleClick = onBubbleClick,
+                            onBubbleLongClick = onBubbleLongClick,
+                            onClickCitation = handleClickCitation,
+                        )
+                    }
+                }
+                if (stageAvatar) {
+                    // 分头像: 回复阶段自己带一个头像
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ChatMessageSideAvatar(
+                            isUser = false,
+                            loading = loading,
+                            model = model,
+                            assistant = assistant,
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            content()
+                        }
+                    }
+                } else {
+                    content()
                 }
             }
-        } else {
-            blockContent()
         }
     }
  
