@@ -23,6 +23,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,10 +35,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
@@ -65,6 +63,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -80,8 +79,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
@@ -138,6 +140,8 @@ import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.Image
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.base64Encode
@@ -148,6 +152,7 @@ import coil3.compose.AsyncImage
 import me.rerere.rikkahub.utils.splitIntoBubbleSegments
 import me.rerere.rikkahub.utils.urlDecode
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
  
 @Composable
@@ -158,6 +163,7 @@ fun ChatMessage(
     model: Model? = null,
     assistant: Assistant? = null,
     lastMessage: Boolean = false,
+    listScrolling: Boolean = false,
     onFork: () -> Unit,
     onRegenerate: () -> Unit,
     onEdit: () -> Unit,
@@ -194,12 +200,21 @@ fun ChatMessage(
     )
     var showActionsSheet by remember { mutableStateOf(false) }
     var showSelectCopySheet by remember { mutableStateOf(false) }
+    // 点气泡快捷菜单: showBubbleMenu 控制显隐, bubbleMenuBlockIndex 记录锚定在哪个内容块 (气泡) 上
     var showBubbleMenu by remember { mutableStateOf(false) }
+    var bubbleMenuBlockIndex by remember { mutableIntStateOf(-1) }
     var showTranslateDialog by remember { mutableStateOf(false) }
     val navController = LocalNavController.current
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
     val isUser = message.role == MessageRole.USER
+
+    // 列表滚动时自动关闭快捷菜单
+    LaunchedEffect(listScrolling) {
+        if (listScrolling) {
+            showBubbleMenu = false
+        }
+    }
 
     Box(modifier = modifier.fillMaxWidth()) {
         // 定稿 UI: 头像/昵称上移到消息组结构, 这里只渲染消息内容本身;
@@ -220,7 +235,105 @@ fun ChatMessage(
                     onToolApproval = onToolApproval,
                     onToolAnswer = onToolAnswer,
                     showSideAvatar = !isUser,
-                    onBubbleClick = { showBubbleMenu = true },
+                    onBubbleClick = { blockIndex ->
+                        bubbleMenuBlockIndex = blockIndex
+                        showBubbleMenu = true
+                    },
+                    bubbleMenu = { alignEnd, menuAnchor ->
+                        // 点气泡快捷菜单: 自定义 Popup 浮层, 锚定在被点气泡上
+                        CompactBubbleMenu(
+                            alignEnd = alignEnd,
+                            anchor = menuAnchor,
+                            onDismissRequest = { showBubbleMenu = false },
+                        ) {
+                            CompactBubbleMenuItem(
+                                text = "引用",
+                                highlight = true,
+                                enabled = onQuote != null,
+                                onClick = {
+                                    showBubbleMenu = false
+                                    onQuote?.invoke(message)
+                                },
+                            )
+                            CompactBubbleMenuItem(
+                                text = "复制",
+                                icon = HugeIcons.Copy01,
+                                onClick = {
+                                    showBubbleMenu = false
+                                    context.copyMessageToClipboard(message)
+                                },
+                            )
+                            if (isUser) {
+                                CompactBubbleMenuItem(
+                                    text = "编辑",
+                                    icon = HugeIcons.Edit01,
+                                    onClick = {
+                                        showBubbleMenu = false
+                                        onEdit()
+                                    },
+                                )
+                                CompactBubbleMenuItem(
+                                    text = "多选",
+                                    icon = HugeIcons.Share04,
+                                    onClick = {
+                                        showBubbleMenu = false
+                                        onShare()
+                                    },
+                                )
+                            } else {
+                                val tts = LocalTTSState.current
+                                val isSpeaking by tts.isSpeaking.collectAsState()
+                                val isAvailable by tts.isAvailable.collectAsState()
+                                CompactBubbleMenuItem(
+                                    text = if (isSpeaking) "停止朗读" else "朗读",
+                                    icon = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
+                                    enabled = isAvailable,
+                                    onClick = {
+                                        showBubbleMenu = false
+                                        if (!isSpeaking) {
+                                            val text = message.toText()
+                                            val textToSpeak = if (settings.ttsOnlyReadQuoted) {
+                                                text.extractQuotedContentAsText() ?: text
+                                            } else {
+                                                text
+                                            }
+                                            tts.speak(textToSpeak)
+                                        } else {
+                                            tts.stop()
+                                        }
+                                    },
+                                )
+                                if (onTranslate != null) {
+                                    CompactBubbleMenuItem(
+                                        text = "翻译",
+                                        icon = HugeIcons.Translate,
+                                        onClick = {
+                                            showBubbleMenu = false
+                                            showTranslateDialog = true
+                                        },
+                                    )
+                                }
+                                CompactBubbleMenuItem(
+                                    text = "重新生成",
+                                    icon = HugeIcons.Refresh03,
+                                    onClick = {
+                                        showBubbleMenu = false
+                                        onRegenerate()
+                                    },
+                                )
+                                CompactBubbleMenuItem(
+                                    text = "更多",
+                                    icon = HugeIcons.MoreVertical,
+                                    onClick = {
+                                        showBubbleMenu = false
+                                        showActionsSheet = true
+                                    },
+                                )
+                            }
+                        }
+                    },
+                    showBubbleMenu = showBubbleMenu,
+                    menuBlockIndex = bubbleMenuBlockIndex,
                     onBubbleLongClick = { showActionsSheet = true },
                     showStreamingCursor = loading && !isUser && lastMessage,
                 )
@@ -240,102 +353,6 @@ fun ChatMessage(
 
             ProvideTextStyle(textStyle) {
                 ChatMessageNerdLine(message = message)
-            }
-        }
-
-        // 点气泡快捷菜单
-        DropdownMenu(
-            expanded = showBubbleMenu,
-            onDismissRequest = { showBubbleMenu = false },
-        ) {
-            DropdownMenuItem(
-                text = { Text("引用") },
-                onClick = {
-                    showBubbleMenu = false
-                    onQuote?.invoke(message)
-                },
-                enabled = onQuote != null,
-            )
-            DropdownMenuItem(
-                text = { Text("复制") },
-                leadingIcon = { Icon(HugeIcons.Copy01, null) },
-                onClick = {
-                    showBubbleMenu = false
-                    context.copyMessageToClipboard(message)
-                },
-            )
-            if (isUser) {
-                DropdownMenuItem(
-                    text = { Text("编辑") },
-                    leadingIcon = { Icon(HugeIcons.Edit01, null) },
-                    onClick = {
-                        showBubbleMenu = false
-                        onEdit()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("多选") },
-                    leadingIcon = { Icon(HugeIcons.Share04, null) },
-                    onClick = {
-                        showBubbleMenu = false
-                        onShare()
-                    },
-                )
-            } else {
-                val tts = LocalTTSState.current
-                val isSpeaking by tts.isSpeaking.collectAsState()
-                val isAvailable by tts.isAvailable.collectAsState()
-                DropdownMenuItem(
-                    text = { Text(if (isSpeaking) "停止朗读" else "朗读") },
-                    leadingIcon = {
-                        Icon(
-                            if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
-                            null,
-                            tint = if (isAvailable) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.38f),
-                        )
-                    },
-                    onClick = {
-                        showBubbleMenu = false
-                        if (!isSpeaking) {
-                            val text = message.toText()
-                            val textToSpeak = if (settings.ttsOnlyReadQuoted) {
-                                text.extractQuotedContentAsText() ?: text
-                            } else {
-                                text
-                            }
-                            tts.speak(textToSpeak)
-                        } else {
-                            tts.stop()
-                        }
-                    },
-                    enabled = isAvailable,
-                )
-                if (onTranslate != null) {
-                    DropdownMenuItem(
-                        text = { Text("翻译") },
-                        leadingIcon = { Icon(HugeIcons.Translate, null) },
-                        onClick = {
-                            showBubbleMenu = false
-                            showTranslateDialog = true
-                        },
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text("重新生成") },
-                    leadingIcon = { Icon(HugeIcons.Refresh03, null) },
-                    onClick = {
-                        showBubbleMenu = false
-                        onRegenerate()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("更多") },
-                    leadingIcon = { Icon(HugeIcons.MoreVertical, null) },
-                    onClick = {
-                        showBubbleMenu = false
-                        showActionsSheet = true
-                    },
-                )
             }
         }
     }
@@ -399,6 +416,102 @@ fun ChatMessage(
         )
     }
 }
+
+// 快捷菜单锚点信息: 锚点(气泡块)的高度与其顶边在窗口中的 y 坐标
+// (用于把菜单定位到气泡上方, 上方空间不足时翻到气泡下方)
+private data class BubbleMenuAnchor(
+    val anchorHeightPx: Int,
+    val anchorTopPx: Int,
+)
+
+// 点气泡快捷菜单: 自定义 Popup 浮层, 视觉对齐原型 .ctx 的紧凑小菜单
+// (圆角 12dp / 内边距 4dp / 最小宽 104dp / 柔和阴影), 深浅色自动跟随 colorScheme.surface;
+// 弹出在气泡上方 8dp 处, 水平靠点击侧 (AI 左对齐 / 用户右对齐), 上方放不下翻到气泡下方;
+// focusable = true 时点击浮层外自动关闭
+@Composable
+private fun CompactBubbleMenu(
+    alignEnd: Boolean,
+    anchor: BubbleMenuAnchor,
+    onDismissRequest: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val density = LocalDensity.current
+    val gapPx = with(density) { 8.dp.toPx().roundToInt() }
+    // 菜单自身高度: 首帧为 0 (先按上方定位), 测量后若上方放不下则翻到气泡下方
+    var menuHeightPx by remember { mutableIntStateOf(0) }
+    val aboveFits = anchor.anchorTopPx >= menuHeightPx + gapPx
+    val offsetY = if (aboveFits) -(anchor.anchorHeightPx + gapPx) else gapPx
+    Popup(
+        alignment = if (alignEnd) Alignment.BottomEnd else Alignment.BottomStart,
+        offset = IntOffset(0, offsetY),
+        onDismissRequest = onDismissRequest,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 3.dp,
+            modifier = Modifier
+                .widthIn(min = 104.dp)
+                .onSizeChanged { menuHeightPx = it.height },
+        ) {
+            Column(
+                modifier = Modifier.padding(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                content = content,
+            )
+        }
+    }
+}
+
+// 快捷菜单项: 高约 30dp 的横向行 (vertical 7dp + horizontal 11dp 内边距),
+// 文字 11.5sp, 图标 12dp 半透明; highlight = true 时浅粉底 + primary 字色加粗 (引用项)
+@Composable
+private fun ColumnScope.CompactBubbleMenuItem(
+    text: String,
+    onClick: () -> Unit,
+    icon: ImageVector? = null,
+    enabled: Boolean = true,
+    highlight: Boolean = false,
+) {
+    val textColor = if (highlight) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    // 禁用态整体降透明度 (文字与图标), 可用态图标按原型降为半透明
+    val itemAlpha = if (enabled) 1f else 0.38f
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .then(
+                if (highlight) {
+                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                } else {
+                    Modifier
+                }
+            )
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 11.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+                tint = textColor.copy(alpha = 0.55f * itemAlpha),
+            )
+        }
+        Text(
+            text = text,
+            fontSize = 11.5.sp,
+            color = textColor.copy(alpha = itemAlpha),
+            fontWeight = if (highlight) FontWeight.SemiBold else null,
+        )
+    }
+}
  
 /**
  * 用户消息字体颜色: 设置了 userMessageFontColor 时, 覆盖用户气泡内文字颜色
@@ -430,6 +543,8 @@ private fun MessageContentBlock(
     onBubbleClick: () -> Unit,
     onBubbleLongClick: () -> Unit,
     onClickCitation: (String) -> Unit,
+    showBubbleMenu: Boolean = false,
+    bubbleMenu: (@Composable (alignEnd: Boolean, anchor: BubbleMenuAnchor) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val displaySettings = LocalDisplaySettings.current
@@ -452,8 +567,20 @@ private fun MessageContentBlock(
             val showCursor = showStreamingCursor && isLastBlock && role == MessageRole.ASSISTANT
             val bubbleModifier = Modifier.widthIn(max = maxBubbleWidth)
 
-            SelectionContainer {
-                Column {
+            // 气泡块容器: 快捷菜单 Popup 锚定在这个 Box 上 (相对气泡定位),
+            // AI 消息菜单靠气泡左缘对齐, 用户消息靠右缘对齐;
+            // onGloballyPositioned 记录气泡块高度与窗口内位置, 供菜单定位到上方/翻到下方
+            var menuAnchor by remember { mutableStateOf(BubbleMenuAnchor(0, 0)) }
+            Box(
+                modifier = Modifier.onGloballyPositioned { coords ->
+                    menuAnchor = BubbleMenuAnchor(
+                        anchorHeightPx = coords.size.height,
+                        anchorTopPx = coords.positionInWindow().y.roundToInt(),
+                    )
+                }
+            ) {
+                SelectionContainer {
+                    Column {
                     if (role == MessageRole.USER) {
                         if (assistant?.splitUserBubbleByLine == true) {
                             // 分气泡: 按用户输入的换行 (\n) 拆成多个独立气泡,
@@ -638,6 +765,11 @@ private fun MessageContentBlock(
                             }
                         }
                     }
+                }
+                // 快捷菜单浮层: 只在锚定的气泡块上渲染
+                if (showBubbleMenu) {
+                    bubbleMenu?.invoke(role == MessageRole.USER, menuAnchor)
+                }
                 }
             }
         }
@@ -843,8 +975,13 @@ private fun MessagePartsBlock(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     showSideAvatar: Boolean = false,
-    onBubbleClick: () -> Unit = {},
+    onBubbleClick: (blockIndex: Int) -> Unit = {},
     onBubbleLongClick: () -> Unit = {},
+    // 点气泡快捷菜单浮层: showBubbleMenu 为 true 且内容块索引等于 menuBlockIndex 时,
+    // 锚定渲染在该气泡块上方 (alignEnd 表示是否靠气泡右缘对齐, anchor 为气泡块的位置尺寸信息)
+    bubbleMenu: (@Composable (alignEnd: Boolean, anchor: BubbleMenuAnchor) -> Unit)? = null,
+    showBubbleMenu: Boolean = false,
+    menuBlockIndex: Int = -1,
     showStreamingCursor: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -977,9 +1114,11 @@ private fun MessagePartsBlock(
                             bubbleAlpha = bubbleAlpha,
                             maxBubbleWidth = maxBubbleWidth,
                             showStreamingCursor = showStreamingCursor,
-                            onBubbleClick = onBubbleClick,
+                            onBubbleClick = { onBubbleClick(blockIndex) },
                             onBubbleLongClick = onBubbleLongClick,
                             onClickCitation = handleClickCitation,
+                            showBubbleMenu = showBubbleMenu && blockIndex == menuBlockIndex,
+                            bubbleMenu = bubbleMenu,
                         )
                     }
                 }

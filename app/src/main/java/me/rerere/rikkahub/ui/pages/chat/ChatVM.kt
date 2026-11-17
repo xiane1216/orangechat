@@ -91,12 +91,6 @@ class ChatVM(
 
     private var sendVisualJob: Job? = null
 
-    // "他收到了" 一次性提示: 每次生成开始时置 true, 1.2s 后自动消失
-    var receivedHintVisible by mutableStateOf(false)
-        private set
-
-    private var receivedHintJob: Job? = null
-
     // 异步任务 (从ChatService获取，响应式)
     val conversationJob: StateFlow<Job?> =
         chatService
@@ -122,22 +116,6 @@ class ChatVM(
 
         // 记住对话ID, 方便下次启动恢复
         context.writeStringPreference("lastConversationId", _conversationId.toString())
-
-        // 监听生成任务: 每次新生成开始 (出现新 Job) 时弹一次 "他收到了", 1.2s 后消失
-        viewModelScope.launch {
-            var previousJob: Job? = null
-            conversationJob.collect { job ->
-                if (job != null && job != previousJob) {
-                    receivedHintJob?.cancel()
-                    receivedHintVisible = true
-                    receivedHintJob = launch {
-                        delay(1200)
-                        receivedHintVisible = false
-                    }
-                }
-                previousJob = job
-            }
-        }
     }
 
     override fun onCleared() {

@@ -110,6 +110,7 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.toJavaLocalDateTime
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -141,7 +142,6 @@ fun ChatList(
     loading: Boolean,
     processingStatus: String? = null,
     sendVisual: SendVisual? = null,
-    showReceivedHint: Boolean = false,
     previewMode: Boolean,
     settings: Settings,
     hazeState: HazeState,
@@ -187,7 +187,6 @@ fun ChatList(
                 loading = loading,
                 processingStatus = processingStatus,
                 sendVisual = sendVisual,
-                showReceivedHint = showReceivedHint,
                 settings = settings,
                 hazeState = hazeState,
                 errors = errors,
@@ -220,7 +219,6 @@ private fun ChatListNormal(
     loading: Boolean,
     processingStatus: String? = null,
     sendVisual: SendVisual?,
-    showReceivedHint: Boolean,
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError>,
@@ -340,7 +338,7 @@ private fun ChatListNormal(
             }
         }
 
-        // 消息分组: 相邻同角色消息合成一组再渲染 (组头一个头像, 组内气泡 4dp 间距)
+        // 消息分组: 相邻同角色消息合成一组再渲染 (组头一个头像, 组内气泡 2dp 间距)
         val displayGroups = remember(displayNodes) {
             val groups = mutableListOf<Pair<MessageRole, MutableList<MessageNode>>>()
             displayNodes.forEach { node ->
@@ -352,6 +350,20 @@ private fun ChatListNormal(
                 }
             }
             groups
+        }
+
+        // 等待跳点时机: 仅在生成已开始、但最后一条 assistant 消息还没有任何可见输出
+        // (消息尚未创建 / 为空 / 没有任何思考、工具或正文内容) 时显示三粉点;
+        // 思考链行或正文一旦开始流式输出, 立即隐藏, 避免与思考链动画同时出现
+        val showWaitingDots = loading && run {
+            val lastMsg = conversation.messageNodes.lastOrNull()?.currentMessage
+            lastMsg == null ||
+                lastMsg.role != MessageRole.ASSISTANT ||
+                (
+                    lastMsg.parts.none { it is UIMessagePart.Reasoning } &&
+                        lastMsg.parts.none { it is UIMessagePart.Tool } &&
+                        lastMsg.toText().isBlank()
+                    )
         }
 
         LazyColumn(
@@ -388,7 +400,7 @@ private fun ChatListNormal(
                     }
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         groupNodes.forEachIndexed { nodeIndex, node ->
                             ListSelectableItem(
@@ -408,6 +420,7 @@ private fun ChatListNormal(
                                     model = node.currentMessage.modelId?.let { settings.findModelById(it) },
                                     assistant = groupAssistant,
                                     loading = loading && isLastGroup && nodeIndex == groupNodes.lastIndex,
+                                    listScrolling = state.isScrollInProgress,
                                     onRegenerate = {
                                         onRegenerate(node.currentMessage)
                                     },
@@ -480,7 +493,9 @@ private fun ChatListNormal(
                 }
             }
 
-            if (loading) {
+            // processingStatus 文字跟跳点同住一个 item: 跳点隐藏时 status 文字也一起消失,
+            // 思考期间画面上只保留思考链动画
+            if (showWaitingDots) {
                 item(LoadingIndicatorKey) {
                     // 等待动画: 组结构 (AI 头像 28dp 在左 + 右侧三个 6dp 粉点跳动), 不再用兔子
                     val loadingAssistant = settings.getAssistantById(conversation.assistantId)
@@ -542,27 +557,6 @@ private fun ChatListNormal(
                     .align(Alignment.BottomCenter)
                     .zIndex(5f)
             )
-
-            // "他收到了" 提示: 生成开始时弹出一次, 1.2s 后淡出 (黑色半透明小胶囊, 居中于聊天区底部上方)
-            AnimatedVisibility(
-                visible = showReceivedHint,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .offset(y = -(64).dp)
-                    .zIndex(6f),
-                enter = fadeIn() + scaleIn(initialScale = 0.94f),
-                exit = fadeOut(),
-            ) {
-                Text(
-                    text = "他收到了",
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF3B3735).copy(alpha = 0.78f))
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
-                )
-            }
 
             // 完成选择
             AnimatedVisibility(
@@ -986,7 +980,7 @@ private fun BoxScope.MessageJumper(
 
 // 组末一条消息下方的 "名字 时间" 小字 (9sp 灰)
 // 对齐: AI 消息左对齐内容列起点 (与思考链行左缘一致), 用户消息靠右对齐内容列右缘;
-// 与气泡垂直间距 4dp; 字体/字号/颜色/格式保持原样不动
+// 与气泡垂直间距 2dp; 字体/字号/颜色/格式保持原样不动
 @Composable
 private fun ChatGroupMetaLine(
     group: Pair<MessageRole, List<MessageNode>>,
@@ -1012,7 +1006,7 @@ private fun ChatGroupMetaLine(
     }
     val metaText = if (name != null) "$name · $timeText" else timeText
     Row(
-        // 与气泡的 4dp 垂直间距由父级 Column 的 spacedBy(4.dp) 提供, 这里不再叠加 padding
+        // 与气泡的 2dp 垂直间距由父级 Column 的 spacedBy(2.dp) 提供, 这里不再叠加 padding
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
@@ -1039,7 +1033,7 @@ private fun SendStatusLine(
         label = "sendStateAlpha",
     )
     Row(
-        // 与气泡的 4dp 垂直间距由父级 Column 的 spacedBy(4.dp) 提供, 这里不再叠加 padding
+        // 与气泡的 2dp 垂直间距由父级 Column 的 spacedBy(2.dp) 提供, 这里不再叠加 padding
         modifier = modifier
             .fillMaxWidth()
             .alpha(lineAlpha),

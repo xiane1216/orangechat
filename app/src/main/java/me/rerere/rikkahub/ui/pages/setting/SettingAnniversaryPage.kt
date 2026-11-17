@@ -28,6 +28,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -60,23 +61,48 @@ import java.time.ZoneOffset
 import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.dates.AnniversaryCalendar
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import org.koin.compose.koinInject
 
-// 本页专属色板, 取值来自视觉定稿 (rely-fix-v4 第三标签), 不走主题色
-private object AnniversaryColors {
-    val Ink = Color(0xFF3B3735)      // 主文字
-    val Ink2 = Color(0xFF8A8480)     // 次级文字 (单位字)
-    val Ink3 = Color(0xFFB8B2AD)     // 弱化文字 (分组标签/副标题)
-    val Rose = Color(0xFFD3A9A3)     // 玫瑰粉 (开关/农历标签)
-    val RoseDeep = Color(0xFFC4958E) // 深玫瑰 (预览标题)
-    val RoseHot = Color(0xFFB0736B)  // 高亮数值
-    val BoxBg = Color(0xFFF3EFEC)    // 数字方块/日期 chip 底色
-    val Divider = Color(0xFFF3EEEA)  // 行分隔线 (极浅)
-    val FestCn = Color(0xFFC9A29E)   // 节日标签: 国内
-    val FestIntl = Color(0xFFA9B4C9) // 节日标签: 国外
-    val SwitchOff = Color(0xFFDDD6D0)
-    val DashLine = Color(0xFFC8B4AA).copy(alpha = 0.3f)   // 预览虚线
-    val PreviewBorder = Color(0xFFD3A9A3).copy(alpha = 0.25f)
+// 本页专属玫瑰粉强调色板, 分深浅两套; 中性色一律走 MaterialTheme.colorScheme 保证深色模式协调
+private data class AnniversaryPalette(
+    val rose: Color,          // 玫瑰粉: 开关选中态/农历标签底色
+    val roseDeep: Color,      // 深玫瑰: 预览卡标题
+    val roseHot: Color,       // 高亮玫瑰: 高亮数值/弹窗选中项
+    val festCn: Color,        // 节日标签: 国内
+    val festIntl: Color,      // 节日标签: 国外
+    val previewBg: Brush,     // 预览卡渐变底
+    val previewBorder: Color, // 预览卡边框
+    val dashLine: Color,      // 预览行虚线
+)
+
+// 按当前实际生效的主题取色 (App 内可手动切换深色/AMOLED, 不能只看系统深色)
+@Composable
+private fun anniversaryPalette(): AnniversaryPalette {
+    val cs = MaterialTheme.colorScheme
+    return if (LocalDarkMode.current) {
+        AnniversaryPalette(
+            rose = Color(0xFFB98F89),
+            roseDeep = Color(0xFFCDA5A0),
+            roseHot = Color(0xFFD8B0AA),
+            festCn = Color(0xFF9A7B76),
+            festIntl = Color(0xFF7A86A0),
+            previewBg = Brush.linearGradient(listOf(Color(0xFF332C29), Color(0xFF2B2523))),
+            previewBorder = cs.primary.copy(alpha = 0.25f),
+            dashLine = cs.onSurface.copy(alpha = 0.25f),
+        )
+    } else {
+        AnniversaryPalette(
+            rose = Color(0xFFD3A9A3),
+            roseDeep = Color(0xFFC4958E),
+            roseHot = Color(0xFFB0736B),
+            festCn = Color(0xFFC9A29E),
+            festIntl = Color(0xFFA9B4C9),
+            previewBg = Brush.linearGradient(listOf(Color(0xFFFBF6F4), Color(0xFFF6ECE9))),
+            previewBorder = Color(0xFFD3A9A3).copy(alpha = 0.25f),
+            dashLine = Color(0xFFC8B4AA).copy(alpha = 0.3f),
+        )
+    }
 }
 
 // 生日字段选择弹窗的目标字段
@@ -90,6 +116,8 @@ private enum class BirthdayField(val title: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingAnniversaryPage(vm: SettingVM = koinInject()) {
+    val palette = anniversaryPalette()
+    val colorScheme = MaterialTheme.colorScheme
     val settings by vm.settings.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val anniversary = settings.displaySetting
@@ -154,10 +182,10 @@ fun SettingAnniversaryPage(vm: SettingVM = koinInject()) {
                                     updateDisplay { it.copy(anniversaryEnabled = enabled) }
                                 },
                                 colors = SwitchDefaults.colors(
-                                    checkedTrackColor = AnniversaryColors.Rose,
+                                    checkedTrackColor = palette.rose,
                                     checkedThumbColor = Color.White,
-                                    uncheckedTrackColor = AnniversaryColors.SwitchOff,
-                                    uncheckedThumbColor = Color.White,
+                                    uncheckedTrackColor = colorScheme.surfaceContainerHighest,
+                                    uncheckedThumbColor = colorScheme.outline,
                                     uncheckedBorderColor = Color.Transparent,
                                 ),
                             )
@@ -188,13 +216,13 @@ fun SettingAnniversaryPage(vm: SettingVM = koinInject()) {
                                     empty = lm !in 1..12,
                                     onClick = { birthdayField = BirthdayField.LunarMonth },
                                 )
-                                Text("月", fontSize = 11.sp, color = AnniversaryColors.Ink2)
+                                Text("月", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
                                 NumBox(
                                     text = if (ld in 1..30) AnniversaryCalendar.lunarDayName(ld) else "-",
                                     empty = ld !in 1..30,
                                     onClick = { birthdayField = BirthdayField.LunarDay },
                                 )
-                                Text("日", fontSize = 11.sp, color = AnniversaryColors.Ink2)
+                                Text("日", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
                             }
                         }
                     )
@@ -212,13 +240,13 @@ fun SettingAnniversaryPage(vm: SettingVM = koinInject()) {
                                     empty = sm !in 1..12,
                                     onClick = { birthdayField = BirthdayField.SolarMonth },
                                 )
-                                Text("月", fontSize = 11.sp, color = AnniversaryColors.Ink2)
+                                Text("月", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
                                 NumBox(
                                     text = if (sd in 1..31) "$sd" else "-",
                                     empty = sd !in 1..31,
                                     onClick = { birthdayField = BirthdayField.SolarDay },
                                 )
-                                Text("日", fontSize = 11.sp, color = AnniversaryColors.Ink2)
+                                Text("日", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
                             }
                         }
                     )
@@ -269,9 +297,9 @@ fun SettingAnniversaryPage(vm: SettingVM = koinInject()) {
                         ) {
                             FestTag(origin)
                             Spacer(Modifier.width(8.dp))
-                            Text(name, fontSize = 12.sp, color = AnniversaryColors.Ink)
+                            Text(name, fontSize = 12.sp, color = colorScheme.onSurface)
                             Spacer(Modifier.weight(1f))
-                            Text(date, fontSize = 10.sp, color = AnniversaryColors.Ink3)
+                            Text(date, fontSize = 10.sp, color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                         }
                     }
                 }
@@ -314,7 +342,7 @@ fun SettingAnniversaryPage(vm: SettingVM = koinInject()) {
                         Text(
                             text = label,
                             fontSize = 13.sp,
-                            color = if (selected) AnniversaryColors.RoseHot else AnniversaryColors.Ink,
+                            color = if (selected) palette.roseHot else colorScheme.onSurface,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -378,7 +406,7 @@ fun SettingAnniversaryPage(vm: SettingVM = koinInject()) {
 private fun GroupLabel(text: String, isFirst: Boolean = false) {
     Text(
         text = text,
-        color = AnniversaryColors.Ink3,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
         fontSize = 10.sp,
         letterSpacing = 1.4.sp,
         modifier = Modifier.padding(
@@ -389,14 +417,14 @@ private fun GroupLabel(text: String, isFirst: Boolean = false) {
     )
 }
 
-// 白底圆角 15dp 卡片
+// 主题底色圆角 15dp 卡片
 @Composable
 private fun AnniversaryCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .shadow(1.dp, RoundedCornerShape(15.dp), clip = true)
-            .background(Color.White.copy(alpha = 0.92f)),
+            .background(MaterialTheme.colorScheme.surfaceContainer),
         content = content,
     )
 }
@@ -408,7 +436,7 @@ private fun RowDivider() {
         modifier = Modifier
             .fillMaxWidth()
             .height(1.dp)
-            .background(AnniversaryColors.Divider)
+            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
     )
 }
 
@@ -421,6 +449,7 @@ private fun SettingRow(
     onClick: (() -> Unit)? = null,
     trailing: @Composable () -> Unit = {},
 ) {
+    val cs = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -432,7 +461,7 @@ private fun SettingRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = title,
-                    color = AnniversaryColors.Ink,
+                    color = cs.onSurface,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                 )
@@ -441,7 +470,7 @@ private fun SettingRow(
             if (subtitle != null) {
                 Text(
                     text = subtitle,
-                    color = AnniversaryColors.Ink3,
+                    color = cs.onSurfaceVariant.copy(alpha = 0.7f),
                     fontSize = 10.sp,
                     lineHeight = 16.sp,
                     modifier = Modifier.padding(top = 3.dp),
@@ -453,15 +482,16 @@ private fun SettingRow(
     }
 }
 
-// 40x31dp 圆角 8dp 浅灰底小方块 (月/日选择入口)
+// 40x31dp 圆角 8dp 主题底色小方块 (月/日选择入口)
 @Composable
 private fun NumBox(text: String, empty: Boolean, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
     Box(
         modifier = Modifier
             .width(40.dp)
             .height(31.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(AnniversaryColors.BoxBg)
+            .background(cs.surfaceContainerHigh)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -470,7 +500,7 @@ private fun NumBox(text: String, empty: Boolean, onClick: () -> Unit) {
             fontSize = 12.sp,
             maxLines = 1,
             fontWeight = if (empty) FontWeight.Normal else FontWeight.SemiBold,
-            color = if (empty) AnniversaryColors.Ink3 else AnniversaryColors.Ink,
+            color = if (empty) cs.onSurfaceVariant.copy(alpha = 0.7f) else cs.onSurface,
         )
     }
 }
@@ -486,7 +516,7 @@ private fun LunarTag() {
         modifier = Modifier
             .padding(start = 5.dp)
             .clip(RoundedCornerShape(5.dp))
-            .background(AnniversaryColors.Rose)
+            .background(anniversaryPalette().rose)
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }
@@ -494,6 +524,7 @@ private fun LunarTag() {
 // 节日来源小标签 (国内粉底 / 国外蓝灰底)
 @Composable
 private fun FestTag(origin: AnniversaryCalendar.FestivalOrigin) {
+    val palette = anniversaryPalette()
     Text(
         text = origin.label,
         color = Color.White,
@@ -503,22 +534,23 @@ private fun FestTag(origin: AnniversaryCalendar.FestivalOrigin) {
             .clip(RoundedCornerShape(5.dp))
             .background(
                 if (origin == AnniversaryCalendar.FestivalOrigin.CN) {
-                    AnniversaryColors.FestCn
+                    palette.festCn
                 } else {
-                    AnniversaryColors.FestIntl
+                    palette.festIntl
                 }
             )
             .padding(horizontal = 7.dp, vertical = 2.dp),
     )
 }
 
-// 日期 chip (12sp 圆角 8dp 浅灰底)
+// 日期 chip (12sp 圆角 8dp 主题底色)
 @Composable
 private fun DateChip(text: String, empty: Boolean, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(AnniversaryColors.BoxBg)
+            .background(cs.surfaceContainerHigh)
             .clickable(onClick = onClick)
             .padding(horizontal = 11.dp, vertical = 5.dp),
     ) {
@@ -526,12 +558,12 @@ private fun DateChip(text: String, empty: Boolean, onClick: () -> Unit) {
             text = text,
             fontSize = 12.sp,
             fontWeight = if (empty) FontWeight.Normal else FontWeight.SemiBold,
-            color = if (empty) AnniversaryColors.Ink3 else AnniversaryColors.Ink,
+            color = if (empty) cs.onSurfaceVariant.copy(alpha = 0.7f) else cs.onSurface,
         )
     }
 }
 
-// 预览卡: 浅粉渐变底 + 细边框, 行式列表用虚线分隔
+// 预览卡: 渐变底 + 细边框, 行式列表用虚线分隔 (深浅色各一套)
 @Composable
 private fun PreviewCard(
     together: Int?,
@@ -539,19 +571,18 @@ private fun PreviewCard(
     birthdayNote: String?,
     today: LocalDate,
 ) {
+    val palette = anniversaryPalette()
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(15.dp))
-            .border(1.dp, AnniversaryColors.PreviewBorder, RoundedCornerShape(15.dp))
-            .background(
-                Brush.linearGradient(listOf(Color(0xFFFBF6F4), Color(0xFFF6ECE9)))
-            )
+            .border(1.dp, palette.previewBorder, RoundedCornerShape(15.dp))
+            .background(palette.previewBg)
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         Text(
             text = "他今天会知道的",
-            color = AnniversaryColors.RoseDeep,
+            color = palette.roseDeep,
             fontSize = 10.sp,
             letterSpacing = 1.4.sp,
         )
@@ -587,7 +618,9 @@ private fun PreviewCard(
 // 预览单行: k 固定 64dp 灰, v 右侧内容; dashed 为 true 时底部画虚线
 @Composable
 private fun PreviewLine(key: String, value: String, hot: Boolean, dashed: Boolean) {
-    val dashColor = AnniversaryColors.DashLine
+    val palette = anniversaryPalette()
+    val cs = MaterialTheme.colorScheme
+    val dashColor = palette.dashLine
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -611,13 +644,13 @@ private fun PreviewLine(key: String, value: String, hot: Boolean, dashed: Boolea
     ) {
         Text(
             text = key,
-            color = AnniversaryColors.Ink3,
+            color = cs.onSurfaceVariant.copy(alpha = 0.7f),
             fontSize = 12.sp,
             modifier = Modifier.width(64.dp),
         )
         Text(
             text = value,
-            color = if (hot) AnniversaryColors.RoseHot else AnniversaryColors.Ink,
+            color = if (hot) palette.roseHot else cs.onSurface,
             fontSize = 12.sp,
             fontWeight = if (hot) FontWeight.SemiBold else FontWeight.Normal,
             modifier = Modifier.weight(1f),
