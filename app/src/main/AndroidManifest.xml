@@ -393,12 +393,16 @@
       android:exported="false"
       android:foregroundServiceType="microphone" />
 
-    <!-- KeepAlive Restart Receiver（提升国产 ROM 存活率） -->
+    <!-- KeepAlive 拉起接收器: 开机 / 覆盖安装后 / 看门狗闹钟重拉前台保活服务 -->
     <receiver
       android:name=".service.KeepAliveRestartReceiver"
-      android:exported="false">
+      android:enabled="true"
+      android:exported="true">
       <intent-filter>
-        <action android:name="me.rerere.orangechat.RESTART_KEEP_ALIVE" />
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        <action android:name="me.rerere.orangechat.KEEP_ALIVE_WATCHDOG" />
       </intent-filter>
     </receiver>
 

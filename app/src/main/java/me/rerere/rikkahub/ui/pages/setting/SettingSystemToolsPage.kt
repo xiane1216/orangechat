@@ -7,6 +7,7 @@
 package me.rerere.rikkahub.ui.pages.setting
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
@@ -230,6 +231,44 @@ fun SettingSystemToolsPage(vm: SettingVM = koinViewModel()) {
                             }
                         }
                     )
+                }
+                if (keepAliveEnabled && KeepAliveService.isStartFailed(context)) {
+                    item(
+                        headlineContent = { Text("⚠ 保活服务启动失败", color = MaterialTheme.colorScheme.error) },
+                        supportingContent = {
+                            Text("系统拒绝拉起常驻服务（常见于通知权限被禁或厂商后台限制）。请授予通知权限、关闭电池优化并允许自启动后，重新开关一次保活。")
+                        },
+                        onClick = {
+                            KeepAliveService.start(context)
+                        }
+                    )
+                }
+                if (keepAliveEnabled) {
+                    val isIgnoringBattery =
+                        me.rerere.rikkahub.data.service.ProactiveMessageWorker.isIgnoringBatteryOptimizations(context)
+                    if (!isIgnoringBattery) {
+                        item(
+                            headlineContent = { Text("电池优化未忽略") },
+                            supportingContent = {
+                                Text("系统可能限制后台活动导致保活失效，建议关闭电池优化")
+                            },
+                            onClick = {
+                                try {
+                                    val intent = Intent(
+                                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                                    ).apply {
+                                        data = Uri.fromParts("package", context.packageName, null)
+                                    }
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    val intent = Intent(
+                                        android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+                                    )
+                                    context.startActivity(intent)
+                                }
+                            }
+                        )
+                    }
                 }
             }
             }

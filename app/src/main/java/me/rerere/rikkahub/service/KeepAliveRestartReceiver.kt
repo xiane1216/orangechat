@@ -9,18 +9,21 @@ package me.rerere.rikkahub.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.util.Log
 
 /**
- * 保活服务重启广播接收器。
+ * 保活服务拉起接收器（2025-11 重构）。
  *
- * 当用户从最近任务列表划掉 App 时，KeepAliveService.onTaskRemoved 会发送
- * [KeepAliveService.ACTION_RESTART_KEEP_ALIVE] 广播；本接收器捕获后重新拉起
- * 前台服务，以提升在小米/华为/OPPO/vivo/荣耀等国产 ROM 上的后台存活率。
+ * 处理三类事件（均为系统豁免的后台启动场景，拉起前台服务真正生效）：
+ * - BOOT_COMPLETED / QUICKBOOT_POWERON：开机完成
+ * - MY_PACKAGE_REPLACED：覆盖安装后（系统会杀掉进程与 FGS，必须重新拉起）
+ * - ACTION_KEEP_ALIVE_WATCHDOG：15 分钟看门狗闹钟（兜底：所有链路都失效时重拉）
  *
- * 注意：部分深度定制的 ROM 可能限制后台自启动，建议用户同时把本 App 加入
- * 系统电池优化白名单。
+ * 是否运行由 KeepAliveService.onStartCommand 自决（读保活开关，关了就退出），
+ * receiver 保持无脑转发，不做不可靠的"服务是否存活"判断。
+ *
+ * 注意：部分深度定制的 ROM（MIUI/鸿蒙等）可能拦截广播拉起，建议用户同时把
+ * 本 App 加入电池优化白名单并允许自启动。
  */
 class KeepAliveRestartReceiver : BroadcastReceiver() {
 
@@ -29,17 +32,13 @@ class KeepAliveRestartReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action == KeepAliveService.ACTION_RESTART_KEEP_ALIVE) {
-            Log.d(TAG, "收到保活重启广播")
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(Intent(context, KeepAliveService::class.java))
-                } else {
-                    context.startService(Intent(context, KeepAliveService::class.java))
-                }
-                Log.d(TAG, "保活服务已通过广播重新启动")
-            } catch (e: Exception) {
-                Log.e(TAG, "广播重启保活服务失败", e)
+        when (intent?.action) {
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_QUICKBOOT_POWERON,
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            KeepAliveService.ACTION_KEEP_ALIVE_WATCHDOG -> {
+                Log.d(TAG, "收到拉起事件: ${intent.action}")
+                KeepAliveService.start(context)
             }
         }
     }

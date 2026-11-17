@@ -41,7 +41,7 @@ import java.util.concurrent.TimeUnit
 object HeartbeatService {
     private const val TAG = "HeartbeatService"
     const val ACTION_HEARTBEAT = "me.rerere.rikkahub.HEARTBEAT_TRIGGER"
-    private const val WORK_NAME = "heartbeat_trigger"
+    const val WORK_NAME = "heartbeat_trigger"
 
     /**
      * 安排下一次心跳触发: idleMinutes 分钟后.

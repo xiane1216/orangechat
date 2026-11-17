@@ -42,6 +42,7 @@ import me.rerere.rikkahub.data.service.HeartbeatService
 import me.rerere.rikkahub.data.service.ProactiveMessageService
 import me.rerere.rikkahub.data.service.SupabaseSyncService
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.KeepAliveService
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.DatabaseUtil
@@ -130,6 +131,9 @@ class RikkaHubApp : Application() {
 
         // Reschedule heartbeat if enabled (WorkManager 任务会被 force-stop 取消, 启动时必须补排)
         rescheduleHeartbeatIfEnabled()
+
+        // Start keep-alive FGS if enabled (开机/覆盖安装由 Receiver 拉起, 这里覆盖其余进程启动场景)
+        startKeepAliveIfEnabled()
 
         // Reschedule Supabase sync alarm if enabled
         rescheduleSupabaseSyncIfEnabled()
@@ -224,6 +228,20 @@ class RikkaHubApp : Application() {
                 }
             }.onFailure {
                 Log.e(TAG, "rescheduleHeartbeatIfEnabled failed", it)
+            }
+        }
+    }
+
+    private fun startKeepAliveIfEnabled() {
+        get<AppScope>().launch {
+            runCatching {
+                val settings = get<SettingsStore>().settingsFlowRaw.first()
+                if (settings.keepAliveEnabled) {
+                    KeepAliveService.start(this@RikkaHubApp)
+                    Log.i(TAG, "Started keep-alive service on app start")
+                }
+            }.onFailure {
+                Log.e(TAG, "startKeepAliveIfEnabled failed", it)
             }
         }
     }
