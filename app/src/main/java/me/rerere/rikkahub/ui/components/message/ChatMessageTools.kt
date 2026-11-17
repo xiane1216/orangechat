@@ -9,8 +9,14 @@ package me.rerere.rikkahub.ui.components.message
 import android.util.Log
 import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.activity.result.contract.ActivityResultContracts
@@ -62,6 +68,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Stroke
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -129,6 +141,7 @@ import me.rerere.rikkahub.ui.components.ui.DotLoading
 import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.FaviconRow
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.context.LocalDisplaySettings
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.hooks.CustomTtsState
 import me.rerere.rikkahub.ui.modifier.shimmer
@@ -327,29 +340,58 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     ControlledChainOfThoughtStep(
         expanded = expanded,
         onExpandedChange = { expanded = it },
-        icon = {
-            if (loading) {
-                DotLoading(
-                    size = 10.dp
-                )
-            } else {
-                Icon(
-                    imageVector = getToolIcon(tool.toolName, memoryAction),
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = LocalContentColor.current.copy(alpha = 0.7f)
-                )
-            }
-        },
+        icon = null,
         label = {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.shimmer(isLoading = loading),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // 定稿 UI: 执行中为粉色胶囊 (转圈 + 正在 xx), 完成后为绿勾 + 小字摘要, 不消失
+            val toolName = ToolNaming.toDisplayName(tool.toolName)
+            val fontSizeRatio = LocalDisplaySettings.current.fontSizeRatio
+            if (loading) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color(0xFFD3A9A3).copy(alpha = 0.12f))
+                        .border(0.5.dp, Color(0xFFD3A9A3).copy(alpha = 0.4f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    ToolSpinner()
+                    Text(
+                        text = "正在$toolName",
+                        fontSize = 11.5.sp * fontSizeRatio,
+                        color = Color(0xFF9A6F68),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                val isSearchWeb = tool.toolName == ToolNames.SEARCH_WEB
+                val baseText = if (isSearchWeb) "已联网搜索" else "已完成$toolName"
+                val unit = if (isSearchWeb) "条来源" else "条结果"
+                val resultCount: Int? = if (tool.isExecuted) {
+                    runCatching {
+                        content.jsonObjectOrNull?.get("items")?.jsonArray?.size
+                            ?: content.jsonObjectOrNull?.get("urls")?.jsonArray?.size
+                            ?: content.jsonObjectOrNull?.get("total_files")
+                                ?.jsonPrimitiveOrNull?.contentOrNull?.toIntOrNull()
+                    }.getOrNull()
+                } else {
+                    null
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    ToolDoneCheck()
+                    Text(
+                        text = resultCount?.let { "$baseText · $it $unit" } ?: baseText,
+                        fontSize = 11.sp * fontSizeRatio,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         },
         extra = if (isPending && onToolApproval != null) {
             {
@@ -378,15 +420,6 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     }
                 }
             }
-        } else {
-            null
-        },
-        onClick = if (content != null || isPending || images.isNotEmpty() || audios.isNotEmpty() ||
-            tool.toolName == ToolNames.WORKSPACE_EDIT_FILE ||
-            tool.toolName == ToolNames.WORKSPACE_WRITE_FILE ||
-            tool.toolName == ToolNames.WORKSPACE_READ_FILE
-        ) {
-            { showResult = true }
         } else {
             null
         },
@@ -617,6 +650,22 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                 if (reason.isNotBlank()) ": $reason" else "",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    // 查看完整输入输出详情 (原步骤行点击行为移到这里)
+                    if (content != null || isPending || images.isNotEmpty() || audios.isNotEmpty() ||
+                        tool.toolName == ToolNames.WORKSPACE_EDIT_FILE ||
+                        tool.toolName == ToolNames.WORKSPACE_WRITE_FILE ||
+                        tool.toolName == ToolNames.WORKSPACE_READ_FILE
+                    ) {
+                        Text(
+                            text = "查看详情",
+                            fontSize = 10.5.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { showResult = true }
+                                .padding(vertical = 2.dp),
                         )
                     }
                 }
@@ -1588,4 +1637,57 @@ private fun WorkspaceShellExitStatus(content: JsonElement, style: TextStyle) {
         style = style,
         color = if (ok) DiffAddedColor else MaterialTheme.colorScheme.error,
     )
+}
+
+// 工具执行中的 10dp 转圈 (粉色)
+@Composable
+private fun ToolSpinner(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "toolSpinner")
+    val angle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = LinearEasing),
+        ),
+        label = "toolSpinnerAngle",
+    )
+    Canvas(
+        modifier = modifier
+            .size(10.dp)
+            .graphicsLayer { rotationZ = angle },
+    ) {
+        val stroke = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round)
+        drawCircle(
+            color = Color(0xFFD3A9A3).copy(alpha = 0.25f),
+            style = stroke,
+        )
+        drawArc(
+            color = Color(0xFFD3A9A3),
+            startAngle = -90f,
+            sweepAngle = 120f,
+            useCenter = false,
+            style = stroke,
+        )
+    }
+}
+
+// 工具完成后的 12dp 绿勾
+@Composable
+private fun ToolDoneCheck(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(12.dp)) {
+        val path = Path().apply {
+            moveTo(size.width * 0.18f, size.height * 0.55f)
+            lineTo(size.width * 0.42f, size.height * 0.78f)
+            lineTo(size.width * 0.82f, size.height * 0.24f)
+        }
+        drawPath(
+            path = path,
+            color = Color(0xFF8FA98F),
+            style = Stroke(
+                width = 1.5.dp.toPx(),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            ),
+        )
+    }
 }

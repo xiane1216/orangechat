@@ -18,6 +18,13 @@ import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -86,28 +93,33 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastCoerceAtLeast
 import androidx.compose.ui.zIndex
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.datetime.toJavaLocalDateTime
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.getAssistantById
+import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.message.ChatMessage
+import me.rerere.rikkahub.ui.components.message.ChatMessageSideAvatar
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.utils.plus
+import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
@@ -141,6 +153,7 @@ fun ChatList(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
+    onQuote: ((UIMessage) -> Unit)? = null,
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -183,6 +196,7 @@ fun ChatList(
                 onToolAnswer = onToolAnswer,
                 onToggleFavorite = onToggleFavorite,
                 onConversationSystemPromptChange = onConversationSystemPromptChange,
+                onQuote = onQuote,
             )
         }
     }
@@ -213,6 +227,7 @@ private fun ChatListNormal(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
+    onQuote: ((UIMessage) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val loadingState by rememberUpdatedState(loading)
@@ -307,6 +322,21 @@ private fun ChatListNormal(
             }
         }
 
+        // 消息分组: 相邻同角色消息合成一组再渲染 (组头一个头像, 组内气泡 4dp 间距)
+        val displayGroups = remember(displayNodes) {
+            buildList {
+                displayNodes.forEach { node ->
+                    val role = node.currentMessage.role
+                    val lastGroup = lastOrNull()
+                    if (lastGroup != null && lastGroup.first == role) {
+                        lastGroup.second.add(node)
+                    } else {
+                        add(role to mutableListOf(node))
+                    }
+                }
+            }
+        }
+
         LazyColumn(
             state = state,
             contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
@@ -317,57 +347,98 @@ private fun ChatListNormal(
                 .padding(top = innerPadding.calculateTopPadding()),
         ) {
             itemsIndexed(
-                items = displayNodes,
-                key = { index, item -> item.id },
-            ) { index, node ->
-                Column {
-                    ListSelectableItem(
-                        key = node.id,
-                        onSelectChange = {
-                            if (!selectedItems.contains(node.id)) {
-                                selectedItems.add(node.id)
-                            } else {
-                                selectedItems.remove(node.id)
-                            }
-                        },
-                        selectedKeys = selectedItems,
-                        enabled = selecting,
+                items = displayGroups,
+                key = { _, group -> "grp_${group.second.first().id}" },
+            ) { groupIndex, group ->
+                val isUserGroup = group.first == MessageRole.USER
+                val groupNodes = group.second
+                val isLastGroup = groupIndex == displayGroups.lastIndex
+                val groupAssistant = settings.getAssistantById(conversation.assistantId)
+                val groupModel = remember(groupNodes, settings) {
+                    groupNodes.lastOrNull()?.currentMessage?.modelId?.let { settings.findModelById(it) }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // AI 组头像在左, 用户组头像在右
+                    if (!isUserGroup) {
+                        ChatMessageSideAvatar(
+                            isUser = false,
+                            loading = loading && isLastGroup,
+                            model = groupModel,
+                            assistant = groupAssistant,
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        ChatMessage(
-                            node = node,
-                            model = node.currentMessage.modelId?.let { settings.findModelById(it) },
-                            assistant = settings.getAssistantById(conversation.assistantId),
-                            loading = loading && index == displayNodes.lastIndex,
-                            onRegenerate = {
-                                onRegenerate(node.currentMessage)
-                            },
-                            onEdit = {
-                                onEdit(node.currentMessage)
-                            },
-                            onFork = {
-                                onForkMessage(node.currentMessage)
-                            },
-                            onDelete = {
-                                onDelete(node.currentMessage)
-                            },
-                            onShare = {
-                                selecting = true  // 使用 CoroutineScope 延迟状态更新
-                                selectedItems.clear()
-                                selectedItems.addAll(conversation.messageNodes.map { it.id }
-                                    .subList(0, conversation.messageNodes.indexOf(node) + 1))
-                            },
-                            onUpdate = {
-                                onUpdateMessage(it)
-                            },
-                            isFavorite = node.isFavorite,
-                            onToggleFavorite = {
-                                onToggleFavorite?.invoke(node)
-                            },
-                            onTranslate = onTranslate,
-                            onClearTranslation = onClearTranslation,
-                            onToolApproval = onToolApproval,
-                            onToolAnswer = onToolAnswer,
-                            lastMessage = index == displayNodes.lastIndex,
+                        groupNodes.forEachIndexed { nodeIndex, node ->
+                            ListSelectableItem(
+                                key = node.id,
+                                onSelectChange = {
+                                    if (!selectedItems.contains(node.id)) {
+                                        selectedItems.add(node.id)
+                                    } else {
+                                        selectedItems.remove(node.id)
+                                    }
+                                },
+                                selectedKeys = selectedItems,
+                                enabled = selecting,
+                            ) {
+                                ChatMessage(
+                                    node = node,
+                                    model = node.currentMessage.modelId?.let { settings.findModelById(it) },
+                                    assistant = groupAssistant,
+                                    loading = loading && isLastGroup && nodeIndex == groupNodes.lastIndex,
+                                    onRegenerate = {
+                                        onRegenerate(node.currentMessage)
+                                    },
+                                    onEdit = {
+                                        onEdit(node.currentMessage)
+                                    },
+                                    onFork = {
+                                        onForkMessage(node.currentMessage)
+                                    },
+                                    onDelete = {
+                                        onDelete(node.currentMessage)
+                                    },
+                                    onShare = {
+                                        selecting = true  // 使用 CoroutineScope 延迟状态更新
+                                        selectedItems.clear()
+                                        selectedItems.addAll(conversation.messageNodes.map { it.id }
+                                            .subList(0, conversation.messageNodes.indexOf(node) + 1))
+                                    },
+                                    onUpdate = {
+                                        onUpdateMessage(it)
+                                    },
+                                    isFavorite = node.isFavorite,
+                                    onToggleFavorite = {
+                                        onToggleFavorite?.invoke(node)
+                                    },
+                                    onTranslate = onTranslate,
+                                    onClearTranslation = onClearTranslation,
+                                    onToolApproval = onToolApproval,
+                                    onToolAnswer = onToolAnswer,
+                                    onQuote = onQuote,
+                                    lastMessage = isLastGroup && nodeIndex == groupNodes.lastIndex,
+                                )
+                            }
+                        }
+                        // 组末一条下方: "名字 时间" 小字
+                        ChatGroupMetaLine(
+                            group = group,
+                            assistant = groupAssistant,
+                            settings = settings,
+                        )
+                    }
+                    if (isUserGroup) {
+                        ChatMessageSideAvatar(
+                            isUser = true,
+                            loading = loading && isLastGroup,
+                            model = groupModel,
+                            assistant = groupAssistant,
                         )
                     }
                 }
@@ -390,9 +461,21 @@ private fun ChatListNormal(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        RabbitLoadingIndicator(
-                            modifier = Modifier.size(28.dp)
-                        )
+                        if (settings.displaySetting.useAppIconStyleLoadingIndicator) {
+                            RabbitLoadingIndicator(
+                                modifier = Modifier.size(28.dp)
+                            )
+                        } else {
+                            // 三个 6dp 粉点上下跳 (相位差 0.15s)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                BouncingLoadingDot(delayMillis = 0)
+                                BouncingLoadingDot(delayMillis = 150)
+                                BouncingLoadingDot(delayMillis = 300)
+                            }
+                        }
                         AnimatedVisibility(
                             visible = processingStatus != null,
                         ) {
@@ -849,4 +932,70 @@ private fun BoxScope.MessageJumper(
             }
         }
     }
+}
+
+// 组末一条消息下方的 "名字 时间" 小字 (9sp 灰)
+@Composable
+private fun ChatGroupMetaLine(
+    group: Pair<MessageRole, List<MessageNode>>,
+    assistant: Assistant?,
+    settings: Settings,
+    modifier: Modifier = Modifier,
+) {
+    val isUser = group.first == MessageRole.USER
+    val lastMessage = group.second.lastOrNull()?.currentMessage ?: return
+    val fontSizeRatio = settings.displaySetting.fontSizeRatio
+    val showModelName = settings.displaySetting.showModelName
+    // 每次重组直接计算, 保证昵称/助手名等设置变化即时生效
+    val timeText = remember(lastMessage.createdAt) {
+        lastMessage.createdAt.toJavaLocalDateTime()
+            .format(DateTimeFormatter.ofPattern("HH:mm"))
+    }
+    val name = if (isUser) {
+        settings.displaySetting.userNickname.takeIf { it.isNotBlank() }
+    } else if (showModelName) {
+        assistant?.name?.takeIf { it.isNotBlank() } ?: "AI"
+    } else {
+        null
+    }
+    val metaText = if (name != null) "$name · $timeText" else timeText
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+    ) {
+        Text(
+            text = metaText,
+            fontSize = 9.sp * fontSizeRatio,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.padding(start = if (!isUser) 36.dp else 0.dp),
+        )
+    }
+}
+
+// 等待动画: 单个 6dp 粉点上下跳 (由 infiniteTransition 驱动, 用 StartOffset 做相位差)
+@Composable
+private fun BouncingLoadingDot(
+    delayMillis: Int,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "bouncingDot")
+    val offsetY by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = -6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+            initialStartOffset = StartOffset(delayMillis),
+        ),
+        label = "bouncingDotOffset",
+    )
+    Box(
+        modifier = modifier
+            .offset(y = offsetY.dp)
+            .size(6.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFD3A9A3)),
+    )
 }

@@ -742,6 +742,13 @@ data class DisplaySetting(
     val assistantBubbleImagePath: String = "",
     val bubbleCornerRadius: Float = 16f,
     val bubbleImageOverlayEnabled: Boolean = false, // 关=纯图片, 开=图片+主题色遮罩
+    // 纪念日与生日 (时间感知注入 + 桌面小组件)
+    val anniversaryEnabled: Boolean = true,
+    val anniversaryLunarBirthdayMonth: Int = 0, // 农历生日 月 1-12, 0=未设置
+    val anniversaryLunarBirthdayDay: Int = 0,   // 农历生日 日 1-30, 0=未设置
+    val anniversarySolarBirthdayMonth: Int = 0, // 阳历生日 月 1-12, 0=未设置
+    val anniversarySolarBirthdayDay: Int = 0,   // 阳历生日 日 1-31, 0=未设置
+    val anniversaryStartDate: String? = null,   // 在一起的日子 (ISO yyyy-MM-dd)
     // 深浅色颜色方案: 跟随应用深浅色状态自动切换两套自定义颜色
     val colorSchemeMode: ColorSchemeMode = ColorSchemeMode.NONE,
     val lightColorScheme: ColorOverrideScheme? = null,

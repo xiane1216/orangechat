@@ -68,6 +68,9 @@ class ChatVM(
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException
     val inputState = ChatInputState()
 
+    // 待引用的消息, 发送下一条用户消息时作为 Quote 部分附带, 发送后清空
+    var pendingQuote by mutableStateOf<UIMessagePart.Quote?>(null)
+
     // 异步任务 (从ChatService获取，响应式)
     val conversationJob: StateFlow<Job?> =
         chatService
@@ -177,9 +180,15 @@ class ChatVM(
      * @param answer 是否触发消息生成，如果为false，则仅添加消息到消息列表中
      */
     fun handleMessageSend(content: List<UIMessagePart>,answer: Boolean = true) {
-        if (content.isEmptyInputMessage()) return
+        // 若有待引用消息, 把 Quote 部分放到新消息最前面
+        val finalContent = pendingQuote?.let { quote ->
+            listOf(quote) + content
+        } ?: content
+        pendingQuote = null
 
-        chatService.sendMessage(_conversationId, content, answer)
+        if (finalContent.isEmptyInputMessage()) return
+
+        chatService.sendMessage(_conversationId, finalContent, answer)
     }
 
     fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {

@@ -143,6 +143,13 @@ class RikkaHubApp : Application() {
         // Start network change monitor (invalidates SSH DNS cache on WiFi<->cell handoff)
         startNetworkChangeMonitor()
 
+        // 纪念日桌面小组件: 零点定时刷新 + 新消息生成完成即时刷新
+        runCatching {
+            me.rerere.rikkahub.widget.AnniversaryWidgetUpdater.start(this)
+        }.onFailure { e ->
+            Log.e(TAG, "Failed to start anniversary widget updater", e)
+        }
+
         // Start App Lock guard (intercepts locked apps when opened) if any app is locked
         startAppLockGuardIfEnabled()
 

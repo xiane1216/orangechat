@@ -8,6 +8,7 @@ package me.rerere.rikkahub.ui.components.message
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,11 +24,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import kotlinx.datetime.toJavaLocalDateTime
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
@@ -38,6 +45,7 @@ import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.hooks.rememberAvatarShape
 import me.rerere.rikkahub.utils.toLocalString
 import java.io.File
 
@@ -210,6 +218,119 @@ fun ChatMessageAssistantAvatar(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+// 组结构用的小头像 (28dp 圆形): 用户组在右侧, AI 组在左侧, 由调用方决定摆放位置
+@Composable
+fun ChatMessageSideAvatar(
+    isUser: Boolean,
+    loading: Boolean,
+    model: Model?,
+    assistant: Assistant?,
+    modifier: Modifier = Modifier,
+) {
+    val settings = LocalSettings.current
+    val shape = if (loading) rememberAvatarShape(true) else CircleShape
+    Box(
+        modifier = modifier.size(28.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (isUser) {
+            SideAvatarContent(
+                name = settings.displaySetting.userNickname,
+                avatar = settings.displaySetting.userAvatar,
+                shape = shape,
+            )
+            AvatarFrameOverlay(
+                framePath = settings.displaySetting.userAvatarFramePath,
+                offsetX = settings.displaySetting.userAvatarFrameOffsetX,
+                offsetY = settings.displaySetting.userAvatarFrameOffsetY,
+                scale = settings.displaySetting.userAvatarFrameScale,
+                baseSize = 28f,
+            )
+        } else {
+            val useAssistantAvatar = assistant?.useAssistantAvatar == true
+            if (useAssistantAvatar && assistant != null) {
+                SideAvatarContent(
+                    name = assistant.name,
+                    avatar = assistant.avatar,
+                    shape = shape,
+                )
+                AvatarFrameOverlay(
+                    framePath = settings.displaySetting.aiAvatarFramePath,
+                    offsetX = settings.displaySetting.aiAvatarFrameOffsetX,
+                    offsetY = settings.displaySetting.aiAvatarFrameOffsetY,
+                    scale = settings.displaySetting.aiAvatarFrameScale,
+                    baseSize = 28f,
+                )
+            } else if (model != null) {
+                // 模型图标
+                Box(contentAlignment = Alignment.Center) {
+                    AutoAIIcon(
+                        name = model.modelId,
+                        modifier = Modifier.size(28.dp),
+                        loading = loading,
+                    )
+                    AvatarFrameOverlay(
+                        framePath = settings.displaySetting.aiAvatarFramePath,
+                        offsetX = settings.displaySetting.aiAvatarFrameOffsetX,
+                        offsetY = settings.displaySetting.aiAvatarFrameOffsetY,
+                        scale = settings.displaySetting.aiAvatarFrameScale,
+                        baseSize = 28f,
+                    )
+                }
+            } else {
+                // 无模型时退化为助手名字首字
+                SideAvatarContent(
+                    name = assistant?.name.orEmpty(),
+                    avatar = assistant?.avatar ?: Avatar.Dummy,
+                    shape = shape,
+                )
+            }
+        }
+    }
+}
+
+// 小头像的具体内容: 图片头像 / emoji 头像 / 兜底首字
+@Composable
+private fun SideAvatarContent(
+    name: String,
+    avatar: Avatar,
+    shape: Shape,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(28.dp)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.secondaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        when (avatar) {
+            is Avatar.Image -> {
+                AsyncImage(
+                    model = avatar.url,
+                    contentDescription = name,
+                    modifier = Modifier.size(28.dp),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+            is Avatar.Emoji -> {
+                Text(
+                    text = avatar.content,
+                    fontSize = 14.sp,
+                )
+            }
+            is Avatar.Dummy -> {
+                Text(
+                    text = name.take(1).ifEmpty { "?" },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
             }
         }
     }

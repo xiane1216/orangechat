@@ -17,10 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -36,43 +33,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
-import me.rerere.rikkahub.ui.context.LocalHazeState
+import me.rerere.rikkahub.ui.components.ui.toComposeColor
 import me.rerere.rikkahub.ui.context.LocalDisplaySettings
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeTint
 
 /**
- * 以时间线/步骤卡片的形式展示一组思考过程。
+ * 轻量化思考链容器。
  *
- * 适用于承载推理步骤、工具调用步骤，或两者混合的链式内容。组件支持：
- * - 在步骤较多时自动折叠，仅展示最后若干步
- * - 点击顶部控制条展开/收起全部步骤
- * - 通过 [collapsedAdaptiveWidth] 控制折叠态是否保持自适应宽度
+ * 定稿 UI: 去掉卡片底色和时间线连线, 只保留一行行轻量步骤;
+ * 步骤较多时仍可折叠, 仅展示最后若干步。
  *
- * @param modifier 外层卡片的修饰符
- * @param cardColors 卡片配色
+ * @param modifier 外层的修饰符
+ * @param cardColors 兼容旧签名的卡片配色 (轻量化后不再渲染卡片底色, 仅保留参数)
  * @param steps 需要渲染的步骤数据列表
  * @param collapsedVisibleCount 折叠时保留可见的尾部步骤数
  * @param collapsedAdaptiveWidth 是否在折叠态下使用内容自适应宽度
@@ -89,143 +74,72 @@ fun <T> ChainOfThought(
     collapsedAdaptiveWidth: Boolean = false,
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
-    val settings = LocalSettings.current
-    // 颜色相关读取深浅色颜色方案生效后的值 (LocalDisplaySettings 已按方案覆盖)
     val dsp = LocalDisplaySettings.current
-    val thinkingAlpha = 1f - dsp.thinkingChainTransparency / 100f
 
     var expanded by remember { mutableStateOf(false) }
     val canCollapse = steps.size > collapsedVisibleCount
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
 
-    val thinkingBubbleColor = dsp.thinkingBubbleColor?.let { it.toComposeColor() }
-    val hazeState = LocalHazeState.current
-    // 气泡磨砂玻璃 (iMessage 风格): 生效条件 = 开关开启 + 存在聊天背景图/背景色
-    val glass = dsp.bubbleGlassEnabled && hazeState != null && (
-        settings.getCurrentAssistant().background != null ||
-            dsp.chatBackgroundColor != null
-        )
-    val effectiveCardColors = CardDefaults.cardColors(
-        // 磨砂模式下底色透明, 由磨砂层提供气泡色调 (透明度设置继续联动)
-        containerColor = if (glass) {
-            Color.Transparent
-        } else {
-            (thinkingBubbleColor ?: cardColors.containerColor).copy(alpha = thinkingAlpha)
-        },
-        contentColor = cardColors.contentColor,
-        disabledContainerColor = cardColors.disabledContainerColor,
-        disabledContentColor = cardColors.disabledContentColor,
-    )
+    // 展开内容浅底颜色: 自定义思考气泡色/思考字色优先, 否则用主题 secondary
+    val contentBgColor = (dsp.thinkingBubbleColor ?: dsp.thinkingTextColor)
+        ?.let { it.toComposeColor() }
+        ?: MaterialTheme.colorScheme.secondary
 
-    Card(
-        modifier = modifier
-            // 先裁圆角再模糊: 磨砂层不会溢出卡片圆角
-            .clip(RoundedCornerShape(dsp.bubbleCornerRadius.dp))
-            .then(
-                if (glass) {
-                    Modifier.hazeEffect(
-                        state = hazeState!!,
-                        // tint = 思考链气泡色 × 用户透明度: 模糊透出背景图颜色, 不发白/不发黑
-                        style = HazeStyle(
-                            backgroundColor = Color.Transparent,
-                            tints = listOf(
-                                HazeTint(
-                                    (thinkingBubbleColor ?: cardColors.containerColor).copy(alpha = thinkingAlpha)
-                                )
-                            ),
-                        )
-                    )
-                } else Modifier
-            ),
-        colors = effectiveCardColors,
-        // 形状对齐聊天气泡: 跟随"气泡圆角"设置
-        shape = RoundedCornerShape(dsp.bubbleCornerRadius.dp),
+    Column(
+        modifier = modifier.animateContentSize(
+            animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+        ),
     ) {
-            Column(
+        val visibleSteps = if (expanded || !canCollapse) {
+            steps
+        } else {
+            steps.takeLast(collapsedVisibleCount)
+        }
+
+        // 展开更多/收起全部步骤 (轻量小字行)
+        if (canCollapse) {
+            Row(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 2.dp)
-                    .animateContentSize(
-                        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
-                    ),
+                    .then(
+                        if (shouldFillCollapseControlWidth) {
+                            Modifier.fillMaxWidth()
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                val visibleSteps = if (expanded || !canCollapse) {
-                    steps
-                } else {
-                    steps.takeLast(collapsedVisibleCount)
-                }
+                Icon(
+                    imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    modifier = Modifier.padding(start = 4.dp),
+                    text = if (expanded) {
+                        "收起全部步骤"
+                    } else {
+                        "展开 ${steps.size - collapsedVisibleCount} 步"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
 
-                // 显示展开/折叠按钮（统一在顶部）
-                if (canCollapse) {
-                    Row(
-                        modifier = Modifier
-                            .then(
-                                if (shouldFillCollapseControlWidth) {
-                                    Modifier.fillMaxWidth()
-                                } else {
-                                    Modifier
-                                }
-                            )
-                            .clip(MaterialTheme.shapes.small)
-                            .clickable { expanded = !expanded }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        // 左侧：图标区域（24.dp，和步骤图标对齐）
-                        Box(
-                            modifier = Modifier.width(24.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-
-                        // 右侧：文字区域（8.dp 间距后开始，和步骤 label 对齐）
-                        Text(
-                            modifier = Modifier.padding(start = 8.dp),
-                            text = if (expanded) {
-                                stringResource(R.string.chain_of_thought_collapse)
-                            } else {
-                                stringResource(
-                                    R.string.chain_of_thought_show_more_steps,
-                                    steps.size - collapsedVisibleCount
-                                )
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-
-                val lineColor = MaterialTheme.colorScheme.outlineVariant
-                val scope = remember { ChainOfThoughtScopeImpl() }
-                Box(
-                    modifier = Modifier
-                        // 独立离屏层: 让图标的挖洞(Clear)只裁掉本层连线, 不会穿透到卡片背景
-                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                        .drawBehind {
-                            val x = 12.dp.toPx()
-                            val offsetPx = 18.dp.toPx()
-                            drawLine(
-                                color = lineColor,
-                                start = Offset(x, offsetPx),
-                                end = Offset(x, size.height - offsetPx),
-                                strokeWidth = 1.dp.toPx()
-                            )
-                        }
-                ) {
-                    Column {
-                        visibleSteps.fastForEach { step ->
-                            scope.content(step)
-                        }
-                    }
-                }
+        val scope = remember(contentBgColor) { ChainOfThoughtScopeImpl(contentBgColor) }
+        Column {
+            visibleSteps.fastForEach { step ->
+                scope.content(step)
             }
         }
     }
+}
 
 /**
  * [ChainOfThought] 内部使用的步骤渲染作用域。
@@ -283,7 +197,9 @@ interface ChainOfThoughtScope {
     )
 }
 
-private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
+private class ChainOfThoughtScopeImpl(
+    private val contentBgColor: Color,
+) : ChainOfThoughtScope {
     @Composable
     override fun ChainOfThoughtStep(
         icon: @Composable (() -> Unit)?,
@@ -356,7 +272,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                 }
             ),
         ) {
-            // Label 行：Icon + Label + Extra + 指示器
+            // Label 行：Icon + Label + Extra + 小箭头 (轻量单行, 无底色)
             Row(
                 modifier = Modifier
                     .then(
@@ -369,50 +285,24 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                     .then(
                         if (onClick != null) {
                             Modifier
-                                .clip(MaterialTheme.shapes.small)
+                                .clip(RoundedCornerShape(8.dp))
                                 .clickable { onClick() }
                         } else if (hasContent) {
                             Modifier
-                                .clip(MaterialTheme.shapes.small)
+                                .clip(RoundedCornerShape(8.dp))
                                 .clickable { onExpandedChange(!expanded) }
                         } else {
                             Modifier
                         }
                     )
-                    .padding(vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Icon（垫块 = 透明挖洞: 在离屏层里裁掉背后的时间线连线,
-                // 洞里直接透出卡片背景/聊天背景图, 任何气泡颜色和透明度下都无色块）
-                Box(
-                    modifier = Modifier.width(24.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .drawWithContent {
-                                drawRect(color = Color.Transparent, blendMode = BlendMode.Clear)
-                                drawContent()
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (icon != null) {
-                            Box(
-                                modifier = Modifier.size(14.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                icon()
-                            }
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.onSurfaceVariant)
-                            )
-                        }
+                // Icon: 为空时不占位
+                if (icon != null) {
+                    Box(contentAlignment = Alignment.Center) {
+                        icon()
                     }
                 }
 
@@ -434,25 +324,25 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                     extra()
                 }
 
-                // 指示器：onClick 显示向右箭头，content 显示展开/折叠箭头
+                // 末尾小箭头: onClick 显示向右箭头, 可展开内容显示展开/折叠箭头
                 if (onClick != null) {
                     Icon(
                         imageVector = HugeIcons.ArrowRight01,
                         contentDescription = null,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(12.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else if (hasContent) {
                     Icon(
                         imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
                         contentDescription = null,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(12.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
-            // 展开内容（缩进对齐 label）
+            // 展开内容: 半透明浅底 + 圆角
             if (contentVisible && hasContent) {
                 Box(
                     modifier = Modifier
@@ -463,7 +353,10 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                                 Modifier
                             }
                         )
-                        .padding(start = 32.dp, top = 4.dp, bottom = 6.dp)
+                        .padding(top = 2.dp, bottom = 4.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(contentBgColor.copy(alpha = 0.07f))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
                     content()
                 }

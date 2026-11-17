@@ -25,8 +25,8 @@ android {
         applicationId = "com.rely.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 204
-        versionName = "2.4.2"
+        versionCode = 205
+        versionName = "2.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -222,6 +222,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.profileinstaller)
     implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")

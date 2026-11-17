@@ -49,6 +49,7 @@ import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.tools.buildMemoryTools
 import me.rerere.rikkahub.data.ai.tools.buildWriteFilesTool
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
+import me.rerere.rikkahub.data.ai.transformers.DateContextTransformer
 import me.rerere.rikkahub.data.ai.transformers.PromptInjectionTransformer
 import me.rerere.rikkahub.data.ai.transformers.PlaceholderTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
@@ -85,6 +86,7 @@ import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.utils.sendNotification
+import me.rerere.rikkahub.notification.buildDirectReplyAction
 import java.time.Instant
 import kotlin.uuid.Uuid
 import org.koin.core.component.KoinComponent
@@ -483,6 +485,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
             PlaceholderTransformer,
             DocumentAsPromptTransformer,
             OcrTransformer,
+            DateContextTransformer,
         )
     }
 
@@ -1194,6 +1197,8 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
             intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        // 通知栏直接回复按钮（收到主动消息后可直接打字回复）
+        val replyAction = buildDirectReplyAction(this, conversationId, notificationId = 20002)
 
         sendNotification(
             channelId = CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID,
@@ -1206,6 +1211,7 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
             category = NotificationCompat.CATEGORY_MESSAGE
             contentIntent = pendingIntent
             useBigTextStyle = true
+            actions = listOf(replyAction)
         }
     }
 

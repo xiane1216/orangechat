@@ -162,6 +162,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingSystemToolsPage
 import me.rerere.rikkahub.ui.pages.setting.SecuritySettingPage
 import me.rerere.rikkahub.ui.pages.setting.SettingProactiveMessagePage
 import me.rerere.rikkahub.ui.pages.setting.SettingHeartbeatPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAnniversaryPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPrivilegeCardPage
 import me.rerere.rikkahub.ui.pages.setting.SettingWeixinBotPage
 import me.rerere.rikkahub.ui.pages.setting.SettingQqBotPage
@@ -703,6 +704,10 @@ entry<Screen.Extensions> {
                                 SettingHeartbeatPage()
                             }
 
+                            entry<Screen.SettingAnniversary> {
+                                SettingAnniversaryPage()
+                            }
+
                             entry<Screen.SettingPrivilegeCard> {
                                 SettingPrivilegeCardPage()
                             }
@@ -1086,6 +1091,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingHeartbeat : Screen
+
+    @Serializable
+    data object SettingAnniversary : Screen
 
     @Serializable
     data object SettingPrivilegeCard : Screen

@@ -85,11 +85,13 @@ import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
 import me.rerere.rikkahub.data.ai.transformers.PlaceholderTransformer
 import me.rerere.rikkahub.data.ai.transformers.PromptInjectionTransformer
+import me.rerere.rikkahub.data.ai.transformers.QuoteTransformer
 import me.rerere.rikkahub.data.ai.transformers.RegexOutputTransformer
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
+import me.rerere.rikkahub.data.ai.transformers.DateContextTransformer
 import me.rerere.rikkahub.data.ai.transformers.VoiceMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.WorkspaceReminderTransformer
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
@@ -116,6 +118,7 @@ import me.rerere.rikkahub.web.NotFoundException
 import me.rerere.rikkahub.utils.applyPlaceholders
 import me.rerere.rikkahub.utils.sendNotification
 import me.rerere.rikkahub.utils.cancelNotification
+import me.rerere.rikkahub.notification.buildDirectReplyAction
 import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -141,9 +144,11 @@ private val inputTransformers by lazy {
         TimeReminderTransformer,
         PromptInjectionTransformer,
         PlaceholderTransformer,
+        QuoteTransformer,
         DocumentAsPromptTransformer,
         OcrTransformer,
         VoiceMessageTransformer,
+        DateContextTransformer,
     )
 }
 
@@ -1523,6 +1528,8 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
             useDefaults = true
             category = NotificationCompat.CATEGORY_MESSAGE
             contentIntent = getPendingIntent(context, conversationId)
+            // 通知栏直接回复按钮（后台收到 AI 回复后可直接打字回复）
+            actions = listOf(buildDirectReplyAction(context, conversationId, notificationId = 1))
         }
     }
 

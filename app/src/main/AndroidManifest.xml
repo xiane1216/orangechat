@@ -206,6 +206,11 @@
 
     <!-- Heartbeat uses WorkManager, no receiver needed. Worker starts ProactiveMessageTriggerService directly. -->
 
+    <!-- 通知栏直接回复（RemoteInput）：把回复文本写入对应会话并触发生成 -->
+    <receiver
+      android:name=".notification.DirectReplyReceiver"
+      android:exported="false" />
+
 
     <!-- Proactive Message Trigger Service -->
     <service
@@ -302,6 +307,19 @@
     <receiver
       android:name=".workflow.trigger.GeofenceTriggerReceiver"
       android:exported="false" />
+
+    <!-- 桌面小组件: 在一起的日子 (Glance) -->
+    <receiver
+      android:name=".widget.AnniversaryWidgetReceiver"
+      android:exported="true"
+      android:label="@string/widget_anniversary_label">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+      </intent-filter>
+      <meta-data
+        android:name="android.appwidget.provider"
+        android:resource="@xml/anniversary_widget_info" />
+    </receiver>
 
     <!-- Screen automation: accessibility service for tap/swipe/read window tree/screenshot -->
     <service

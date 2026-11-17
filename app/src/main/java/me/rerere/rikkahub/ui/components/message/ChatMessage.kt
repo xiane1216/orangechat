@@ -8,15 +8,16 @@ package me.rerere.rikkahub.ui.components.message
  
 import android.content.Intent
 import android.media.MediaPlayer
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -33,7 +34,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
@@ -44,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -55,17 +60,22 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
@@ -88,13 +98,20 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Copy01
+import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.File02
+import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.PlayCircle
 import me.rerere.hugeicons.stroke.PauseCircle
+import me.rerere.hugeicons.stroke.Refresh03
+import me.rerere.hugeicons.stroke.Share04
+import me.rerere.hugeicons.stroke.StopCircle
+import me.rerere.hugeicons.stroke.Translate
 import me.rerere.hugeicons.stroke.Video01
+import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
@@ -112,6 +129,7 @@ import me.rerere.rikkahub.ui.components.ui.toComposeColor
 import me.rerere.rikkahub.ui.context.LocalDisplaySettings
 import me.rerere.rikkahub.ui.context.LocalHazeState
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.HazeStyle
@@ -123,6 +141,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Image
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.base64Encode
+import me.rerere.rikkahub.utils.copyMessageToClipboard
+import me.rerere.rikkahub.utils.extractQuotedContentAsText
 import me.rerere.rikkahub.utils.openUrl
 import coil3.compose.AsyncImage
 import me.rerere.rikkahub.utils.splitIntoBubbleSegments
@@ -150,6 +170,7 @@ fun ChatMessage(
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onQuote: ((UIMessage) -> Unit)? = null,
 ) {
     val message = node.messages[node.selectIndex]
     val settings = LocalDisplaySettings.current
@@ -173,90 +194,169 @@ fun ChatMessage(
     )
     var showActionsSheet by remember { mutableStateOf(false) }
     var showSelectCopySheet by remember { mutableStateOf(false) }
+    var showBubbleMenu by remember { mutableStateOf(false) }
+    var showTranslateDialog by remember { mutableStateOf(false) }
     val navController = LocalNavController.current
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
-    // 长按消息弹出操作面板 (微信式交互, 定稿 UI: 移除消息下方常驻图标行)
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        if (!message.parts.isEmptyUIMessage()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            ) {
-                ChatMessageAssistantAvatar(
-                    message = message,
-                    model = model,
-                    assistant = assistant,
-                    loading = loading,
-                    modifier = Modifier.weight(1f)
-                )
-                ChatMessageUserAvatar(
-                    message = message,
-                    avatar = settings.userAvatar,
-                    nickname = settings.userNickname,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-        ProvideTextStyle(textStyle) {
-            MessagePartsBlock(
-                assistant = assistant,
-                role = message.role,
-                parts = message.parts,
-                annotations = message.annotations,
-                loading = loading,
-                model = model,
-                onToolApproval = onToolApproval,
-                onToolAnswer = onToolAnswer,
-                onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
-            )
+    val isUser = message.role == MessageRole.USER
 
-            message.translation?.let { translation ->
-                CollapsibleTranslationText(
-                    content = translation,
-                    onClickCitation = {}
-                )
-            }
-        }
-
-        val showActions = if (lastMessage) {
-            !loading
-        } else {
-            message.parts.isEmptyUIMessage().not()
-        }
-
-        AnimatedVisibility(
-            visible = showActions,
-            enter = slideInVertically { it / 2 } + fadeIn(),
-            exit = slideOutVertically { it / 2 } + fadeOut()
+    Box(modifier = modifier.fillMaxWidth()) {
+        // 定稿 UI: 头像/昵称上移到消息组结构, 这里只渲染消息内容本身;
+        // 点气泡弹出快捷菜单, 长按弹出完整操作面板
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Column(
-                modifier = Modifier.animateContentSize()
-            ) {
-                ChatMessageActionButtons(
-                    message = message,
-                    onRegenerate = onRegenerate,
-                    node = node,
-                    onUpdate = onUpdate,
-                    onOpenActionSheet = {
+            ProvideTextStyle(textStyle) {
+                MessagePartsBlock(
+                    assistant = assistant,
+                    role = message.role,
+                    parts = message.parts,
+                    annotations = message.annotations,
+                    loading = loading,
+                    model = model,
+                    onToolApproval = onToolApproval,
+                    onToolAnswer = onToolAnswer,
+                    showSideAvatar = !isUser,
+                    onBubbleClick = { showBubbleMenu = true },
+                    onBubbleLongClick = { showActionsSheet = true },
+                    showStreamingCursor = loading && !isUser && lastMessage,
+                )
+
+                message.translation?.let { translation ->
+                    CollapsibleTranslationText(
+                        content = translation,
+                        onClickCitation = {}
+                    )
+                }
+            }
+
+            // 多版本消息保留分支切换入口 (仅在有多版本时显示)
+            if (node.messages.size > 1) {
+                ChatMessageBranchSelector(node = node, onUpdate = onUpdate)
+            }
+
+            ProvideTextStyle(textStyle) {
+                ChatMessageNerdLine(message = message)
+            }
+        }
+
+        // 点气泡快捷菜单
+        DropdownMenu(
+            expanded = showBubbleMenu,
+            onDismissRequest = { showBubbleMenu = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("引用") },
+                onClick = {
+                    showBubbleMenu = false
+                    onQuote?.invoke(message)
+                },
+                enabled = onQuote != null,
+            )
+            DropdownMenuItem(
+                text = { Text("复制") },
+                leadingIcon = { Icon(HugeIcons.Copy01, null) },
+                onClick = {
+                    showBubbleMenu = false
+                    context.copyMessageToClipboard(message)
+                },
+            )
+            if (isUser) {
+                DropdownMenuItem(
+                    text = { Text("编辑") },
+                    leadingIcon = { Icon(HugeIcons.Edit01, null) },
+                    onClick = {
+                        showBubbleMenu = false
+                        onEdit()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("多选") },
+                    leadingIcon = { Icon(HugeIcons.Share04, null) },
+                    onClick = {
+                        showBubbleMenu = false
+                        onShare()
+                    },
+                )
+            } else {
+                val tts = LocalTTSState.current
+                val isSpeaking by tts.isSpeaking.collectAsState()
+                val isAvailable by tts.isAvailable.collectAsState()
+                DropdownMenuItem(
+                    text = { Text(if (isSpeaking) "停止朗读" else "朗读") },
+                    leadingIcon = {
+                        Icon(
+                            if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
+                            null,
+                            tint = if (isAvailable) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.38f),
+                        )
+                    },
+                    onClick = {
+                        showBubbleMenu = false
+                        if (!isSpeaking) {
+                            val text = message.toText()
+                            val textToSpeak = if (settings.ttsOnlyReadQuoted) {
+                                text.extractQuotedContentAsText() ?: text
+                            } else {
+                                text
+                            }
+                            tts.speak(textToSpeak)
+                        } else {
+                            tts.stop()
+                        }
+                    },
+                    enabled = isAvailable,
+                )
+                if (onTranslate != null) {
+                    DropdownMenuItem(
+                        text = { Text("翻译") },
+                        leadingIcon = { Icon(HugeIcons.Translate, null) },
+                        onClick = {
+                            showBubbleMenu = false
+                            showTranslateDialog = true
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text("重新生成") },
+                    leadingIcon = { Icon(HugeIcons.Refresh03, null) },
+                    onClick = {
+                        showBubbleMenu = false
+                        onRegenerate()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("更多") },
+                    leadingIcon = { Icon(HugeIcons.MoreVertical, null) },
+                    onClick = {
+                        showBubbleMenu = false
                         showActionsSheet = true
                     },
-                    onTranslate = onTranslate,
-                    onClearTranslation = onClearTranslation
                 )
             }
         }
-
-        ProvideTextStyle(textStyle) {
-            ChatMessageNerdLine(message = message)
-        }
     }
+
+    // 翻译语言选择对话框
+    if (showTranslateDialog && onTranslate != null) {
+        LanguageSelectionDialog(
+            onLanguageSelected = { language ->
+                showTranslateDialog = false
+                onTranslate(message, language)
+            },
+            onClearTranslation = {
+                showTranslateDialog = false
+                onClearTranslation(message)
+            },
+            onDismissRequest = {
+                showTranslateDialog = false
+            },
+        )
+    }
+
     if (showActionsSheet) {
         ChatMessageActionsSheet(
             message = message,
@@ -289,7 +389,7 @@ fun ChatMessage(
             }
         )
     }
- 
+
     if (showSelectCopySheet) {
         ChatMessageCopySheet(
             message = message,
@@ -316,6 +416,421 @@ private fun UserMessageTextColor(content: @Composable () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MessageContentBlock(
+    block: MessagePartBlock.ContentBlock,
+    role: MessageRole,
+    assistant: Assistant?,
+    parts: List<UIMessagePart>,
+    isLastBlock: Boolean,
+    bubbleAlpha: Float,
+    maxBubbleWidth: Dp,
+    showStreamingCursor: Boolean,
+    onBubbleClick: () -> Unit,
+    onBubbleLongClick: () -> Unit,
+    onClickCitation: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val displaySettings = LocalDisplaySettings.current
+    when (val part = block.part) {
+        is UIMessagePart.Text -> {
+            // 从显示文本中移除[zip:...]标记
+            val displayText = remember(part.text) {
+                part.text.replace(Regex("\\[zip:[^\\]]+\\]", RegexOption.IGNORE_CASE), "")
+            }
+
+            // 引用部分: 渲染在首个正文文本的气泡内顶部
+            val quotePart = remember(parts) {
+                parts.filterIsInstance<UIMessagePart.Quote>().firstOrNull()
+            }
+            val firstTextIndex = remember(parts) {
+                parts.indexOfFirst { it is UIMessagePart.Text }
+            }
+            val showQuote = quotePart != null && block.index == firstTextIndex
+            // 流式光标: 仅最后一条 AI 消息的最后一个内容块显示
+            val showCursor = showStreamingCursor && isLastBlock && role == MessageRole.ASSISTANT
+            val bubbleModifier = Modifier.widthIn(max = maxBubbleWidth)
+
+            SelectionContainer {
+                Column {
+                    if (role == MessageRole.USER) {
+                        if (assistant?.splitUserBubbleByLine == true) {
+                            // 分气泡: 按用户输入的换行 (\n) 拆成多个独立气泡,
+                            // 拆分逻辑见 splitIntoBubbleSegments (会保护代码块/表格内部的换行)
+                            val bubbleSegments = remember(displayText) {
+                                displayText.splitIntoBubbleSegments()
+                            }
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                horizontalAlignment = Alignment.End,
+                            ) {
+                                bubbleSegments.fastForEachIndexed { segIndex, segment ->
+                                    key(segIndex) {
+                                        BubbleSurface(
+                                            imagePath = displaySettings.userBubbleImagePath,
+                                            cornerRadius = displaySettings.bubbleCornerRadius.dp,
+                                            color = displaySettings.userBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.secondaryContainer,
+                                            overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
+                                            bubbleAlpha = bubbleAlpha,
+                                            modifier = bubbleModifier,
+                                            onClick = onBubbleClick,
+                                            onLongClick = onBubbleLongClick,
+                                        ) {
+                                            if (showQuote && segIndex == 0) {
+                                                quotePart?.let { MessageQuoteBlock(quote = it) }
+                                            }
+                                            UserMessageTextColor {
+                                                MarkdownBlock(
+                                                    content = segment.replaceRegexes(
+                                                        assistant = assistant,
+                                                        scope = AssistantAffectScope.USER,
+                                                        visual = true,
+                                                    ),
+                                                    onClickCitation = onClickCitation
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            BubbleSurface(
+                                imagePath = displaySettings.userBubbleImagePath,
+                                cornerRadius = displaySettings.bubbleCornerRadius.dp,
+                                color = displaySettings.userBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.secondaryContainer,
+                                overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
+                                bubbleAlpha = bubbleAlpha,
+                                modifier = bubbleModifier,
+                                onClick = onBubbleClick,
+                                onLongClick = onBubbleLongClick,
+                            ) {
+                                if (showQuote) {
+                                    quotePart?.let { MessageQuoteBlock(quote = it) }
+                                }
+                                UserMessageTextColor {
+                                    MarkdownBlock(
+                                        content = displayText.replaceRegexes(
+                                            assistant = assistant,
+                                            scope = AssistantAffectScope.USER,
+                                            visual = true,
+                                        ),
+                                        onClickCitation = onClickCitation
+                                    )
+                                }
+                            }
+                        }
+                    } else if (assistant?.splitBubbleByLine == true) {
+                        // 分气泡: 按模型自己写的换行 (\n) 拆成多个独立气泡,
+                        // 拆分逻辑见 splitIntoBubbleSegments (会保护代码块/表格内部的换行)
+                        val bubbleSegments = remember(displayText) {
+                            displayText.splitIntoBubbleSegments()
+                        }
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            bubbleSegments.fastForEachIndexed { segIndex, segment ->
+                                key(segIndex) {
+                                    if (displaySettings.showAssistantBubble) {
+                                        BubbleSurface(
+                                            imagePath = displaySettings.assistantBubbleImagePath,
+                                            cornerRadius = displaySettings.bubbleCornerRadius.dp,
+                                            color = displaySettings.assistantBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
+                                            bubbleAlpha = bubbleAlpha,
+                                            modifier = bubbleModifier,
+                                            onClick = onBubbleClick,
+                                            onLongClick = onBubbleLongClick,
+                                        ) {
+                                            if (showQuote && segIndex == 0) {
+                                                quotePart?.let { MessageQuoteBlock(quote = it) }
+                                            }
+                                            MarkdownBlock(
+                                                content = segment.replaceRegexes(
+                                                    assistant = assistant,
+                                                    scope = AssistantAffectScope.ASSISTANT,
+                                                    visual = true,
+                                                ),
+                                                onClickCitation = onClickCitation,
+                                            )
+                                            if (showCursor && segIndex == bubbleSegments.lastIndex) {
+                                                StreamingCursor()
+                                            }
+                                        }
+                                    } else {
+                                        Box(
+                                            modifier = bubbleModifier
+                                                .animateContentSize()
+                                                .combinedClickable(
+                                                    onClick = onBubbleClick,
+                                                    onLongClick = onBubbleLongClick,
+                                                )
+                                        ) {
+                                            if (showQuote && segIndex == 0) {
+                                                quotePart?.let { MessageQuoteBlock(quote = it) }
+                                            }
+                                            MarkdownBlock(
+                                                content = segment.replaceRegexes(
+                                                    assistant = assistant,
+                                                    scope = AssistantAffectScope.ASSISTANT,
+                                                    visual = true,
+                                                ),
+                                                onClickCitation = onClickCitation,
+                                            )
+                                            if (showCursor && segIndex == bubbleSegments.lastIndex) {
+                                                StreamingCursor()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        if (displaySettings.showAssistantBubble) {
+                            BubbleSurface(
+                                imagePath = displaySettings.assistantBubbleImagePath,
+                                cornerRadius = displaySettings.bubbleCornerRadius.dp,
+                                color = displaySettings.assistantBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.surfaceContainerHigh,
+                                overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
+                                bubbleAlpha = bubbleAlpha,
+                                modifier = bubbleModifier,
+                                onClick = onBubbleClick,
+                                onLongClick = onBubbleLongClick,
+                            ) {
+                                if (showQuote) {
+                                    quotePart?.let { MessageQuoteBlock(quote = it) }
+                                }
+                                MarkdownBlock(
+                                    content = displayText.replaceRegexes(
+                                        assistant = assistant,
+                                        scope = AssistantAffectScope.ASSISTANT,
+                                        visual = true,
+                                    ),
+                                    onClickCitation = onClickCitation,
+                                )
+                                if (showCursor) {
+                                    StreamingCursor()
+                                }
+                            }
+                        } else {
+                            Box(
+                                modifier = bubbleModifier
+                                    .animateContentSize()
+                                    .combinedClickable(
+                                        onClick = onBubbleClick,
+                                        onLongClick = onBubbleLongClick,
+                                    )
+                            ) {
+                                if (showQuote) {
+                                    quotePart?.let { MessageQuoteBlock(quote = it) }
+                                }
+                                MarkdownBlock(
+                                    content = displayText.replaceRegexes(
+                                        assistant = assistant,
+                                        scope = AssistantAffectScope.ASSISTANT,
+                                        visual = true,
+                                    ),
+                                    onClickCitation = onClickCitation,
+                                )
+                                if (showCursor) {
+                                    StreamingCursor()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        is UIMessagePart.Video -> {
+            Surface(
+                tonalElevation = 2.dp,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW)
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    intent.data = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        part.url.toUri().toFile()
+                    )
+                    val chooserIndent = Intent.createChooser(intent, null)
+                    context.startActivity(chooserIndent)
+                },
+                modifier = Modifier,
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+                    Icon(HugeIcons.Video01, null)
+                }
+            }
+        }
+
+        is UIMessagePart.Audio -> {
+            AudioPlayerBubble(url = part.url)
+        }
+
+        is UIMessagePart.VoiceMessage -> {
+            VoiceMessageBubble(
+                voiceMessage = part,
+                isUser = role == MessageRole.USER,
+            )
+        }
+
+        is UIMessagePart.Image -> {
+            val isImageLoading =
+                part.url.isBlank() || part.url.matches(Regex("^data:image/[^;]*;base64,\\s*$"))
+            if (isImageLoading) {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .shimmer(isLoading = true)
+                )
+            } else {
+                ZoomableAsyncImage(
+                    model = part.url,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .clip(MaterialTheme.shapes.medium)
+                        .height(72.dp)
+                )
+            }
+        }
+
+        is UIMessagePart.Document -> {
+            Surface(
+                tonalElevation = 2.dp,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW)
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    intent.data = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        part.url.toUri().toFile()
+                    )
+                    val chooserIndent = Intent.createChooser(intent, null)
+                    context.startActivity(chooserIndent)
+                },
+                modifier = Modifier,
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.tertiaryContainer
+            ) {
+                ProvideTextStyle(MaterialTheme.typography.labelSmall) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        when (part.mime) {
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> {
+                                Icon(
+                                    painter = painterResource(R.drawable.docx),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            "application/pdf" -> {
+                                Icon(
+                                    painter = painterResource(R.drawable.pdf),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            else -> {
+                                Icon(
+                                    imageVector = HugeIcons.File02,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = part.fileName,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 200.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        else -> {
+            // Skip unknown part types (e.g., deprecated ToolCall, ToolResult, Search)
+        }
+    }
+}
+
+// 消息内引用块: 正文气泡内顶部展示被引用的消息 (玫瑰粉左边框 + 浅色底)
+@Composable
+private fun MessageQuoteBlock(
+    quote: UIMessagePart.Quote,
+    modifier: Modifier = Modifier,
+) {
+    val rose = Color(0xFFD3A9A3)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = 4.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(rose.copy(alpha = 0.10f))
+            .drawBehind {
+                drawLine(
+                    color = rose.copy(alpha = 0.45f),
+                    start = Offset(x = 1.dp.toPx(), y = 0f),
+                    end = Offset(x = 1.dp.toPx(), y = size.height),
+                    strokeWidth = 2.dp.toPx(),
+                )
+            }
+            .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                text = quote.quotedAuthor,
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF9A6F68),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = quote.quotedText,
+                fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+// 流式输出光标: 粉色竖条闪烁
+@Composable
+private fun StreamingCursor(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "streamingCursor")
+    val alpha by transition.animateFloat(
+        initialValue = 0.15f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(500),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "streamingCursorAlpha",
+    )
+    val cursorHeight = with(LocalDensity.current) { 14.sp.toDp() }
+    Box(
+        modifier = modifier
+            .padding(top = 2.dp)
+            .width(2.dp)
+            .height(cursorHeight)
+            .background(Color(0xFFD3A9A3).copy(alpha = alpha)),
+    )
+}
+
 @OptIn(FlowPreview::class)
 @Composable
 private fun MessagePartsBlock(
@@ -327,17 +842,20 @@ private fun MessagePartsBlock(
     loading: Boolean,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
-    onUserMessageClick: (() -> Unit)? = null,
+    showSideAvatar: Boolean = false,
+    onBubbleClick: () -> Unit = {},
+    onBubbleLongClick: () -> Unit = {},
+    showStreamingCursor: Boolean = false,
 ) {
     val context = LocalContext.current
     val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
- 
+
     // 消息输出HapticFeedback
     val hapticFeedback = LocalHapticFeedback.current
     val displaySettings = LocalDisplaySettings.current
     val bubbleAlpha = 1f - displaySettings.chatBubbleTransparency / 100f
     val partsState by rememberUpdatedState(parts)
- 
+
     val handleClickCitation: (String) -> Unit = remember {
         handler@{ citationId ->
             partsState.forEach { part ->
@@ -367,314 +885,84 @@ private fun MessagePartsBlock(
                 }
             }
     }
- 
+
     // Render parts in original order (group thinking/tool as chain-of-thought)
     val groupedParts = remember(parts) { parts.groupMessageParts() }
-    groupedParts.fastForEach { block ->
-        when (block) {
-            is MessagePartBlock.ThinkingBlock -> {
-                if (block.steps.isNotEmpty()) {
-                    val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
-                    ChainOfThought(
-                        modifier = Modifier.animateContentSize(),
-                        steps = block.steps,
-                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                    ) { step ->
-                        when (step) {
-                            is ThinkingStep.ReasoningStep -> {
-                                key(step.reasoning.createdAt) {
-                                    ChatMessageReasoningStep(
-                                        reasoning = step.reasoning,
-                                        model = model,
-                                        assistant = assistant,
-                                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                                    )
-                                }
-                            }
- 
-                            is ThinkingStep.ToolStep -> {
-                                key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
-                                    ChatMessageToolStep(
-                                        tool = step.tool,
-                                        loading = loading && !step.tool.isExecuted,
-                                        allParts = parts,
-                                        onToolApproval = onToolApproval,
-                                        onToolAnswer = onToolAnswer,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
- 
-            is MessagePartBlock.ContentBlock -> key(block.index) {
-                when (val part = block.part) {
-                    is UIMessagePart.Text -> {
-                        // 从显示文本中移除[zip:...]标记
-                        val displayText = remember(part.text) {
-                            part.text.replace(Regex("\\[zip:[^\\]]+\\]", RegexOption.IGNORE_CASE), "")
-                        }
-                        
-                        SelectionContainer {
-                            Column {
-                                if (role == MessageRole.USER) {
-                                    if (assistant?.splitUserBubbleByLine == true) {
-                                        // 分气泡: 按用户输入的换行 (\n) 拆成多个独立气泡,
-                                        // 拆分逻辑见 splitIntoBubbleSegments (会保护代码块/表格内部的换行)
-                                        val bubbleSegments = remember(displayText) {
-                                            displayText.splitIntoBubbleSegments()
-                                        }
-                                        Column(
-                                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                                            horizontalAlignment = Alignment.End,
-                                        ) {
-                                            bubbleSegments.fastForEachIndexed { segIndex, segment ->
-                                                key(segIndex) {
-                                                    BubbleSurface(
-                                                        imagePath = displaySettings.userBubbleImagePath,
-                                                        cornerRadius = displaySettings.bubbleCornerRadius.dp,
-                                                        color = displaySettings.userBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.secondaryContainer,
-                                                        overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
-                                                        bubbleAlpha = bubbleAlpha,
-                                                        onClick = { onUserMessageClick?.invoke() },
-                                                    ) {
-                                                        UserMessageTextColor {
-                                                            MarkdownBlock(
-                                                                content = segment.replaceRegexes(
-                                                                    assistant = assistant,
-                                                                    scope = AssistantAffectScope.USER,
-                                                                    visual = true,
-                                                                ),
-                                                                onClickCitation = handleClickCitation
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        BubbleSurface(
-                                            imagePath = displaySettings.userBubbleImagePath,
-                                            cornerRadius = displaySettings.bubbleCornerRadius.dp,
-                                            color = displaySettings.userBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.secondaryContainer,
-                                            overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
-                                            bubbleAlpha = bubbleAlpha,
-                                            onClick = { onUserMessageClick?.invoke() },
-                                        ) {
-                                            UserMessageTextColor {
-                                                MarkdownBlock(
-                                                    content = displayText.replaceRegexes(
-                                                        assistant = assistant,
-                                                        scope = AssistantAffectScope.USER,
-                                                        visual = true,
-                                                    ),
-                                                    onClickCitation = handleClickCitation
-                                                )
-                                            }
-                                        }
-                                    }
-                                } else if (assistant?.splitBubbleByLine == true) {
-                                    // 分气泡: 按模型自己写的换行 (\n) 拆成多个独立气泡,
-                                    // 拆分逻辑见 splitIntoBubbleSegments (会保护代码块/表格内部的换行)
-                                    val bubbleSegments = remember(displayText) {
-                                        displayText.splitIntoBubbleSegments()
-                                    }
-                                    Column(
-                                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                                    ) {
-                                        bubbleSegments.fastForEachIndexed { segIndex, segment ->
-                                            key(segIndex) {
-                                                if (displaySettings.showAssistantBubble) {
-                                                    BubbleSurface(
-                                                        imagePath = displaySettings.assistantBubbleImagePath,
-                                                        cornerRadius = displaySettings.bubbleCornerRadius.dp,
-                                                        color = displaySettings.assistantBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.surfaceContainerHigh,
-                                                        overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
-                                                        bubbleAlpha = bubbleAlpha,
-                                                    ) {
-                                                        MarkdownBlock(
-                                                            content = segment.replaceRegexes(
-                                                                assistant = assistant,
-                                                                scope = AssistantAffectScope.ASSISTANT,
-                                                                visual = true,
-                                                            ),
-                                                            onClickCitation = handleClickCitation,
-                                                        )
-                                                    }
-                                                } else {
-                                                    MarkdownBlock(
-                                                        content = segment.replaceRegexes(
-                                                            assistant = assistant,
-                                                            scope = AssistantAffectScope.ASSISTANT,
-                                                            visual = true,
-                                                        ),
-                                                        onClickCitation = handleClickCitation,
-                                                        modifier = Modifier
-                                                            .animateContentSize()
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    if (displaySettings.showAssistantBubble) {
-                                        BubbleSurface(
-                                            imagePath = displaySettings.assistantBubbleImagePath,
-                                            cornerRadius = displaySettings.bubbleCornerRadius.dp,
-                                            color = displaySettings.assistantBubbleColor?.let { it.toComposeColor() } ?: MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
-                                            bubbleAlpha = bubbleAlpha,
-                                        ) {
-                                            MarkdownBlock(
-                                                content = displayText.replaceRegexes(
-                                                    assistant = assistant,
-                                                    scope = AssistantAffectScope.ASSISTANT,
-                                                    visual = true,
-                                                ),
-                                                onClickCitation = handleClickCitation,
-                                            )
-                                        }
-                                    } else {
-                                        MarkdownBlock(
-                                            content = displayText.replaceRegexes(
-                                                assistant = assistant,
-                                                scope = AssistantAffectScope.ASSISTANT,
-                                                visual = true,
-                                            ),
-                                            onClickCitation = handleClickCitation,
-                                            modifier = Modifier
-                                                .animateContentSize()
+    // 气泡最大宽度: 0.75 屏宽
+    val maxBubbleWidth = (LocalConfiguration.current.screenWidthDp * 0.75).dp
+    groupedParts.fastForEachIndexed { blockIndex, block ->
+        val blockContent: @Composable () -> Unit = {
+            when (block) {
+                is MessagePartBlock.ThinkingBlock -> {
+                    if (block.steps.isNotEmpty()) {
+                        val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
+                        ChainOfThought(
+                            modifier = Modifier.animateContentSize(),
+                            steps = block.steps,
+                            collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                        ) { step ->
+                            when (step) {
+                                is ThinkingStep.ReasoningStep -> {
+                                    key(step.reasoning.createdAt) {
+                                        ChatMessageReasoningStep(
+                                            reasoning = step.reasoning,
+                                            model = model,
+                                            assistant = assistant,
+                                            collapsedAdaptiveWidth = isReasoningOnlyBlock,
                                         )
                                     }
                                 }
-                                
-                            }
-                        }
-                    }
- 
-                    is UIMessagePart.Video -> {
-                        Surface(
-                            tonalElevation = 2.dp,
-                            onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW)
-                                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                intent.data = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    part.url.toUri().toFile()
-                                )
-                                val chooserIndent = Intent.createChooser(intent, null)
-                                context.startActivity(chooserIndent)
-                            },
-                            modifier = Modifier,
-                            shape = RoundedCornerShape(8.dp),
-                        ) {
-                            Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
-                                Icon(HugeIcons.Video01, null)
-                            }
-                        }
-                    }
- 
-                    is UIMessagePart.Audio -> {
-                        AudioPlayerBubble(url = part.url)
-                    }
- 
-                    is UIMessagePart.VoiceMessage -> {
-                        VoiceMessageBubble(
-                            voiceMessage = part,
-                            isUser = role == MessageRole.USER,
-                        )
-                    }
- 
-                    is UIMessagePart.Image -> {
-                        val isImageLoading =
-                            part.url.isBlank() || part.url.matches(Regex("^data:image/[^;]*;base64,\\s*$"))
-                        if (isImageLoading) {
-                            Box(
-                                modifier = Modifier
-                                    .size(72.dp)
-                                    .clip(MaterialTheme.shapes.medium)
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .shimmer(isLoading = true)
-                            )
-                        } else {
-                            ZoomableAsyncImage(
-                                model = part.url,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .clip(MaterialTheme.shapes.medium)
-                                    .height(72.dp)
-                            )
-                        }
-                    }
- 
-                    is UIMessagePart.Document -> {
-                        Surface(
-                            tonalElevation = 2.dp,
-                            onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW)
-                                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                intent.data = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    part.url.toUri().toFile()
-                                )
-                                val chooserIndent = Intent.createChooser(intent, null)
-                                context.startActivity(chooserIndent)
-                            },
-                            modifier = Modifier,
-                            shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.tertiaryContainer
-                        ) {
-                            ProvideTextStyle(MaterialTheme.typography.labelSmall) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    when (part.mime) {
-                                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> {
-                                            Icon(
-                                                painter = painterResource(R.drawable.docx),
-                                                contentDescription = null,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
- 
-                                        "application/pdf" -> {
-                                            Icon(
-                                                painter = painterResource(R.drawable.pdf),
-                                                contentDescription = null,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
- 
-                                        else -> {
-                                            Icon(
-                                                imageVector = HugeIcons.File02,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
+
+                                is ThinkingStep.ToolStep -> {
+                                    key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
+                                        ChatMessageToolStep(
+                                            tool = step.tool,
+                                            loading = loading && !step.tool.isExecuted,
+                                            allParts = parts,
+                                            onToolApproval = onToolApproval,
+                                            onToolAnswer = onToolAnswer,
+                                        )
                                     }
- 
-                                    Text(
-                                        text = part.fileName,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.widthIn(max = 200.dp)
-                                    )
                                 }
                             }
                         }
                     }
- 
-                    else -> {
-                        // Skip unknown part types (e.g., deprecated ToolCall, ToolResult, Search)
-                    }
+                }
+
+                is MessagePartBlock.ContentBlock -> key(block.index) {
+                    MessageContentBlock(
+                        block = block,
+                        role = role,
+                        assistant = assistant,
+                        parts = parts,
+                        isLastBlock = blockIndex == groupedParts.lastIndex,
+                        bubbleAlpha = bubbleAlpha,
+                        maxBubbleWidth = maxBubbleWidth,
+                        showStreamingCursor = showStreamingCursor,
+                        onBubbleClick = onBubbleClick,
+                        onBubbleLongClick = onBubbleLongClick,
+                        onClickCitation = handleClickCitation,
+                    )
                 }
             }
+        }
+        if (showSideAvatar) {
+            // AI 消息分头像: 每个阶段块 (思考/工具/正文气泡) 上方带一个小头像
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ChatMessageSideAvatar(
+                    isUser = false,
+                    loading = loading,
+                    model = model,
+                    assistant = assistant,
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    blockContent()
+                }
+            }
+        } else {
+            blockContent()
         }
     }
  
@@ -743,6 +1031,7 @@ private fun MessagePartsBlock(
     }
 }
  
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BubbleSurface(
     imagePath: String,
@@ -750,16 +1039,27 @@ private fun BubbleSurface(
     color: Color,
     overlayEnabled: Boolean,
     bubbleAlpha: Float,
+    modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
+    // 点按弹快捷菜单, 长按打开完整操作面板
+    val clickableModifier = if (onClick != null || onLongClick != null) {
+        Modifier.combinedClickable(
+            onClick = onClick ?: {},
+            onLongClick = onLongClick,
+        )
+    } else {
+        Modifier
+    }
     val hasImage = imagePath.isNotBlank() && java.io.File(imagePath).exists()
     if (hasImage) {
         Box(
-            modifier = Modifier
+            modifier = modifier
                 .animateContentSize()
                 .clip(RoundedCornerShape(cornerRadius))
-                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .then(clickableModifier)
         ) {
             AsyncImage(
                 model = imagePath,
@@ -790,7 +1090,7 @@ private fun BubbleSurface(
             // 磨砂模式: 用普通 Box 而非 Surface(onClick), 去掉 48dp 最小触摸尺寸撑高,
             // 气泡物理上紧贴内容, 大小和关闭磨砂时观感一致
             Box(
-                modifier = Modifier
+                modifier = modifier
                     .animateContentSize()
                     // 先裁圆角再模糊: 磨砂层不会溢出气泡圆角
                     .clip(RoundedCornerShape(cornerRadius))
@@ -804,16 +1104,17 @@ private fun BubbleSurface(
                             )
                         )
                     )
-                    .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                    .then(clickableModifier)
             ) {
                 Column(modifier = Modifier.padding(8.dp)) { content() }
             }
         } else {
-            Surface(
-                modifier = Modifier.animateContentSize(),
-                shape = RoundedCornerShape(cornerRadius),
-                color = color.copy(alpha = bubbleAlpha),
-                onClick = onClick ?: {},
+            Box(
+                modifier = modifier
+                    .animateContentSize()
+                    .clip(RoundedCornerShape(cornerRadius))
+                    .background(color.copy(alpha = bubbleAlpha))
+                    .then(clickableModifier)
             ) {
                 Column(modifier = Modifier.padding(8.dp)) { content() }
             }

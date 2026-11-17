@@ -6,12 +6,12 @@
 
 package me.rerere.rikkahub.ui.components.message
  
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,15 +39,14 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import com.composables.icons.lucide.Heart
 import com.composables.icons.lucide.Lucide
-import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.replaceRegexes
@@ -55,12 +54,8 @@ import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.components.ui.toComposeColor
 import me.rerere.rikkahub.ui.context.LocalDisplaySettings
-import me.rerere.rikkahub.ui.modifier.shimmer
-import me.rerere.rikkahub.utils.extractThinkingTitle
 import kotlin.time.Clock
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.seconds
-import kotlin.time.DurationUnit
  
 enum class ReasoningCardState(val expanded: Boolean) {
     Collapsed(false),
@@ -138,9 +133,11 @@ private fun ReasoningContent(
 ) {
     val isPreview = expandState == ReasoningCardState.Preview
     val displaySettings = LocalDisplaySettings.current
+    // 思考全文样式: 11.5sp 灰、行距宽松, 跟随思考链字号比例
+    val contentFontSize = 11.5.sp * displaySettings.thinkingFontSizeRatio
     val thinkingStyle = MaterialTheme.typography.bodySmall.copy(
-        fontSize = MaterialTheme.typography.bodySmall.fontSize * displaySettings.thinkingFontSizeRatio,
-        lineHeight = MaterialTheme.typography.bodySmall.lineHeight * displaySettings.thinkingFontSizeRatio,
+        fontSize = contentFontSize,
+        lineHeight = contentFontSize * 1.8f,
     ).let { style ->
         if (thinkingColor != null) style.copy(color = thinkingColor) else style
     }
@@ -218,11 +215,23 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     collapsedAdaptiveWidth: Boolean = false,
 ) {
     val (state, loading) = rememberReasoningState(reasoning)
-    val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
-    val showThinkingTitle = loading && thinkingTitle != null
-    // 思考链字体颜色: 自定义设置优先 (♡ / 标题 / 内容统一), null 时跟随主题 secondary
+    // 思考链字体颜色: 自定义设置优先, null 时头部用主题灰, 玫瑰粉仅作为心形兜底色
     val customThinkingColor = LocalDisplaySettings.current.thinkingTextColor?.let { it.toComposeColor() }
-    val thinkingColor = customThinkingColor ?: MaterialTheme.colorScheme.secondary
+    val headerColor = customThinkingColor ?: MaterialTheme.colorScheme.onSurfaceVariant
+    val heartColor = customThinkingColor ?: Color(0xFFD3A9A3)
+    // 生成中: 心形心跳缩放动画
+    val heartTransition = rememberInfiniteTransition(label = "thinkingHeart")
+    val heartScale by heartTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "thinkingHeartScale",
+    )
+    // 头部字号跟随全局字号比例
+    val headerFontSize = 12.sp * LocalDisplaySettings.current.fontSizeRatio
 
     ControlledChainOfThoughtStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
@@ -232,34 +241,26 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             Icon(
                 imageVector = Lucide.Heart,
                 contentDescription = null,
-                modifier = Modifier.size(12.dp),
-                tint = thinkingColor,
+                modifier = Modifier
+                    .size(13.dp)
+                    .graphicsLayer {
+                        scaleX = if (loading) heartScale else 1f
+                        scaleY = if (loading) heartScale else 1f
+                    },
+                tint = heartColor,
             )
         },
         label = {
-            if (showThinkingTitle) {
-                ReasoningTitle(title = thinkingTitle!!, color = thinkingColor)
-            } else {
-                Text(
-                    text = stringResource(
-                        R.string.deep_thinking_seconds,
-                        state.duration.toDouble(DurationUnit.SECONDS).toFloat()
-                    ),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = thinkingColor,
-                    modifier = Modifier.shimmer(isLoading = loading),
-                )
-            }
-        },
-        extra = {
-            if (showThinkingTitle && state.duration > 0.seconds) {
-                Text(
-                    text = state.duration.toString(DurationUnit.SECONDS, 1),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = thinkingColor,
-                    modifier = Modifier.shimmer(isLoading = loading),
-                )
-            }
+            Text(
+                text = if (loading) {
+                    "正在深度思考…"
+                } else {
+                    val seconds = state.duration.inWholeSeconds
+                    if (seconds > 0) "已深度思考 · ${seconds}秒" else "已深度思考"
+                },
+                fontSize = headerFontSize,
+                color = headerColor,
+            )
         },
         collapsedAdaptiveWidth = collapsedAdaptiveWidth,
         contentVisible = state.expandState != ReasoningCardState.Collapsed,
@@ -275,26 +276,4 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             )
         },
     )
-}
- 
- 
-@Composable
-private fun ReasoningTitle(title: String, color: Color) {
-    AnimatedContent(
-        targetState = title,
-        transitionSpec = {
-            (slideInVertically { height -> height } + fadeIn()).togetherWith(
-                slideOutVertically { height -> -height } + fadeOut()
-            )
-        }
-    ) {
-        Text(
-            text = it,
-            style = MaterialTheme.typography.titleSmall,
-            color = color,
-            modifier = Modifier
-                .padding(horizontal = 4.dp)
-                .shimmer(true),
-        )
-    }
 }

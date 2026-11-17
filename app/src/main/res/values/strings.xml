@@ -506,6 +506,8 @@
   <string name="voice_call">Voice Call</string>
   <string name="no_text_content_to_copy">No text content available to copy</string>
   <string name="notification_channel_chat_completed">Chat Completed</string>
+  <string name="widget_anniversary_label">Days Together</string>
+  <string name="widget_anniversary_description">Shows avatar and days together count</string>
   <string name="notification_channel_chat_live_update">Chat Generation Progress</string>
   <string name="notification_channel_web_server">Web Server</string>
   <string name="notification_live_update_chip_thinking">Thinking</string>

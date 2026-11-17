@@ -1,7 +1,7 @@
 pluginManagement {
     repositories {
         // 国内镜像优先（原仓库保底）
-        maven("https://maven.aliyun.com/repository/google") {
+        maven("https://dl.google.com/dl/android/maven2") {
             content {
                 includeGroupByRegex("com\\.android.*")
                 includeGroupByRegex("com\\.google.*")
@@ -10,7 +10,7 @@ pluginManagement {
                 excludeGroup("com.google.devtools.ksp")
             }
         }
-        maven("https://maven.aliyun.com/repository/public") {
+        maven("https://repo1.maven.org/maven2") {
             // 阿里云镜像对 KSP 组整体回源 502（CI 实测），排除后由后续仓库兜底
             content {
                 excludeGroup("com.google.devtools.ksp")
@@ -41,13 +41,13 @@ plugins {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        maven("https://maven.aliyun.com/repository/google") {
+        maven("https://dl.google.com/dl/android/maven2") {
             // 同上：KSP 组在该镜像回源 502，排除后走后续仓库
             content {
                 excludeGroup("com.google.devtools.ksp")
             }
         }
-        maven("https://maven.aliyun.com/repository/public") {
+        maven("https://repo1.maven.org/maven2") {
             // 阿里云镜像对 KSP 组整体回源 502（CI 实测），排除后由后续仓库兜底
             content {
                 excludeGroup("com.google.devtools.ksp")

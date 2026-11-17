@@ -8,11 +8,17 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
@@ -48,9 +54,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,6 +69,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.core.MessageRole
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
@@ -317,98 +326,107 @@ private fun ChatPageContent(
                 )
             },
             bottomBar = {
-                ChatInput(
-                    state = inputState,
-                    loading = loadingJob != null,
-                    settings = setting,
-                    conversation = conversation,
-                    mcpManager = vm.mcpManager,
-                    hazeState = hazeState,
-                    autoStartVoice = autoStartVoice,
-                    onCancelClick = {
-                        vm.stopGeneration()
-                    },
-                    enableSearch = enableWebSearch,
-                    onToggleSearch = {
-                        vm.updateSettings(setting.copy(enableWebSearch = !enableWebSearch))
-                    },
-                    onSendClick = {
-                        if (currentChatModel == null) {
-                            toaster.show("请先选择模型", type = ToastType.Error)
-                            return@ChatInput
-                        }
-                        if (inputState.isEditing()) {
-                            vm.handleMessageEdit(
-                                parts = inputState.getContents(),
-                                messageId = inputState.editingMessage!!,
-                            )
-                        } else {
-                            vm.handleMessageSend(inputState.getContents())
-                            scope.launch {
-                                chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
+                Column {
+                    // 引用条: 显示待引用消息, 点击 X 取消
+                    vm.pendingQuote?.let { quote ->
+                        QuoteBar(
+                            quote = quote,
+                            onClose = { vm.pendingQuote = null },
+                        )
+                    }
+                    ChatInput(
+                        state = inputState,
+                        loading = loadingJob != null,
+                        settings = setting,
+                        conversation = conversation,
+                        mcpManager = vm.mcpManager,
+                        hazeState = hazeState,
+                        autoStartVoice = autoStartVoice,
+                        onCancelClick = {
+                            vm.stopGeneration()
+                        },
+                        enableSearch = enableWebSearch,
+                        onToggleSearch = {
+                            vm.updateSettings(setting.copy(enableWebSearch = !enableWebSearch))
+                        },
+                        onSendClick = {
+                            if (currentChatModel == null) {
+                                toaster.show("请先选择模型", type = ToastType.Error)
+                                return@ChatInput
                             }
-                        }
-                        inputState.clearInput()
-                    },
-                    onVoiceMessage = { url, duration, transcript ->
-                        if (currentChatModel == null) {
-                            toaster.show("请先选择模型", type = ToastType.Error)
-                            return@ChatInput
-                        }
-                        vm.handleMessageSend(
-                            listOf(
-                                UIMessagePart.VoiceMessage(
-                                    url = url,
-                                    duration = duration,
-                                    transcript = transcript,
+                            if (inputState.isEditing()) {
+                                vm.handleMessageEdit(
+                                    parts = inputState.getContents(),
+                                    messageId = inputState.editingMessage!!,
+                                )
+                            } else {
+                                vm.handleMessageSend(inputState.getContents())
+                                scope.launch {
+                                    chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
+                                }
+                            }
+                            inputState.clearInput()
+                        },
+                        onVoiceMessage = { url, duration, transcript ->
+                            if (currentChatModel == null) {
+                                toaster.show("请先选择模型", type = ToastType.Error)
+                                return@ChatInput
+                            }
+                            vm.handleMessageSend(
+                                listOf(
+                                    UIMessagePart.VoiceMessage(
+                                        url = url,
+                                        duration = duration,
+                                        transcript = transcript,
+                                    )
                                 )
                             )
-                        )
-                        scope.launch {
-                            chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
-                        }
-                    },
-                    onLongSendClick = {
-                        if (inputState.isEditing()) {
-                            vm.handleMessageEdit(
-                                parts = inputState.getContents(),
-                                messageId = inputState.editingMessage!!,
-                            )
-                        } else {
-                            vm.handleMessageSend(content = inputState.getContents(), answer = false)
                             scope.launch {
                                 chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
                             }
-                        }
-                        inputState.clearInput()
-                    },
-                    onUpdateChatModel = {
-                        vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
-                    },
-                    onUpdateAssistant = {
-                        vm.updateSettings(
-                            setting.copy(
-                                assistants = setting.assistants.map { assistant ->
-                                    if (assistant.id == it.id) {
-                                        it
-                                    } else {
-                                        assistant
-                                    }
+                        },
+                        onLongSendClick = {
+                            if (inputState.isEditing()) {
+                                vm.handleMessageEdit(
+                                    parts = inputState.getContents(),
+                                    messageId = inputState.editingMessage!!,
+                                )
+                            } else {
+                                vm.handleMessageSend(content = inputState.getContents(), answer = false)
+                                scope.launch {
+                                    chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
                                 }
+                            }
+                            inputState.clearInput()
+                        },
+                        onUpdateChatModel = {
+                            vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
+                        },
+                        onUpdateAssistant = {
+                            vm.updateSettings(
+                                setting.copy(
+                                    assistants = setting.assistants.map { assistant ->
+                                        if (assistant.id == it.id) {
+                                            it
+                                        } else {
+                                            assistant
+                                        }
+                                    }
+                                )
                             )
-                        )
-                    },
-                    onUpdateSearchService = { index ->
-                        vm.updateSettings(
-                            setting.copy(
-                                searchServiceSelected = index
+                        },
+                        onUpdateSearchService = { index ->
+                            vm.updateSettings(
+                                setting.copy(
+                                    searchServiceSelected = index
+                                )
                             )
-                        )
-                    },
-                    onCompressContext = { additionalPrompt, targetTokens, keepRecentMessages ->
-                        vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
-                    },
-                )
+                        },
+                        onCompressContext = { additionalPrompt, targetTokens, keepRecentMessages ->
+                            vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
+                        },
+                    )
+                }
             },
             containerColor = Color.Transparent,
         ) { innerPadding ->
@@ -485,6 +503,25 @@ private fun ChatPageContent(
                 onConversationSystemPromptChange = { newPrompt ->
                     vm.updateConversation(conversation.copy(customSystemPrompt = newPrompt))
                     vm.saveConversationAsync()
+                },
+                onQuote = { message ->
+                    // 设置待引用消息, 发送时作为 Quote 部分附带
+                    val author = if (message.role == MessageRole.USER) {
+                        setting.displaySetting.userNickname.ifBlank { "我" }
+                    } else {
+                        setting.getCurrentAssistant().name.ifBlank { "AI" }
+                    }
+                    val text = message.parts
+                        .filterIsInstance<UIMessagePart.Text>()
+                        .joinToString("\n") { it.text }
+                        .trim()
+                    if (text.isNotEmpty()) {
+                        vm.pendingQuote = UIMessagePart.Quote(
+                            quotedMessageId = message.id,
+                            quotedAuthor = author,
+                            quotedText = text.take(QUOTE_TEXT_MAX_LENGTH),
+                        )
+                    }
                 },
             )
         }
@@ -628,5 +665,68 @@ private fun TopBar(
                 }
             }
         )
+    }
+}
+
+// 引用回复允许的文本最大长度, 超出截断
+private const val QUOTE_TEXT_MAX_LENGTH = 500
+
+// 引用条: 输入框上方展示待引用消息, 顶部玫瑰粉细条 + 浅粉底
+@Composable
+private fun QuoteBar(
+    quote: UIMessagePart.Quote,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        // 顶部玫瑰粉细条
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .background(Color(0xFFD3A9A3))
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFFD3A9A3).copy(alpha = 0.10f))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "引用 ${quote.quotedAuthor}",
+                    color = Color(0xFF9A6F68),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = quote.quotedText.take(QUOTE_TEXT_MAX_LENGTH),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // 关闭按钮
+            Box(
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .size(17.dp)
+                    .clip(CircleShape)
+                    .background(Color.Gray.copy(alpha = 0.25f))
+                    .clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Cancel01,
+                    contentDescription = "取消引用",
+                    modifier = Modifier.size(8.dp),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+            }
+        }
     }
 }

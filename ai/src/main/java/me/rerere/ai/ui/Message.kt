@@ -462,6 +462,15 @@ sealed class UIMessagePart {
     ) : UIMessagePart()
 
     @Serializable
+    @SerialName("quote")
+    data class Quote(
+        val quotedMessageId: String? = null,
+        val quotedAuthor: String,
+        val quotedText: String,
+        override var metadata: JsonObject? = null
+    ) : UIMessagePart()
+
+    @Serializable
     @SerialName("reasoning")
     data class Reasoning(
         val reasoning: String,
@@ -575,6 +584,7 @@ fun List<UIMessagePart>.toSortedMessageParts(): List<UIMessagePart> {
             is UIMessagePart.ToolCall -> 0
             is UIMessagePart.ToolResult -> 0
             is UIMessagePart.Search -> 0
+            is UIMessagePart.Quote -> 0
             is UIMessagePart.Image -> 1
             is UIMessagePart.Video -> 1
             is UIMessagePart.Audio -> 1

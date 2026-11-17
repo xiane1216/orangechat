@@ -287,6 +287,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text("心跳机制") },
                     )
                     item(
+                        onClick = { navController.navigate(Screen.SettingAnniversary) },
+                        leadingContent = { Icon(HugeIcons.InLove, null) },
+                        supportingContent = { Text("让 AI 记得农历/阳历生日、在一起天数、节日和节气") },
+                        headlineContent = { Text("纪念日与生日") },
+                    )
+                    item(
                         onClick = { navController.navigate(Screen.SettingPrivilegeCard) },
                         leadingContent = { Icon(HugeIcons.Ticket01, null) },
                         supportingContent = { Text("情侣特权券：爸爸的卡与宝宝的卡，AI 聊天中自动查卡/用卡/发卡") },

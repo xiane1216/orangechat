@@ -34,6 +34,9 @@ class NotificationConfig {
     var contentIntent: PendingIntent? = null
     var useBigTextStyle: Boolean = false
 
+    // 附加 Action 按钮（如通知栏直接回复）
+    var actions: List<NotificationCompat.Action> = emptyList()
+
     // Live Update 相关
     var requestPromotedOngoing: Boolean = false
     var shortCriticalText: String? = null
@@ -101,6 +104,7 @@ object NotificationUtil {
             config.subText?.let { setSubText(it) }
             config.category?.let { setCategory(it) }
             config.contentIntent?.let { setContentIntent(it) }
+            config.actions.forEach { addAction(it) }
 
             if (config.useBigTextStyle) {
                 setStyle(NotificationCompat.BigTextStyle().bigText(config.content))
