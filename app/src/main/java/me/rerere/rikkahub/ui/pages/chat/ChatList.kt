@@ -1135,15 +1135,25 @@ private fun buildGroups(nodes: List<MessageNode>): List<ChatDisplayGroup> {
     var currentRole: MessageRole? = null
     var currentHasTool = false
     var currentIds = mutableListOf<Uuid>()
+    var prevCreatedAt: kotlinx.datetime.LocalDateTime? = null
     fun flush() {
         if (currentIds.isNotEmpty()) {
             groups.add(ChatDisplayGroup(currentRole!!, currentHasTool, currentIds.toList()))
         }
     }
     nodes.forEach { node ->
-        val role = node.currentMessage.role
-        val hasTool = node.currentMessage.parts.any { it is UIMessagePart.Tool }
-        if (role == currentRole && hasTool == currentHasTool) {
+        val msg = node.currentMessage
+        val role = msg.role
+        val hasTool = msg.parts.any { it is UIMessagePart.Tool }
+        // 相邻同角色消息间隔超过 5 分钟视为一次新的开口 (心跳/主动消息必然间隔很久),
+        // 独立成组拥有自己的头像; 正常连续聊天间隔在分钟级以内, 不受影响
+        val gapSplit = prevCreatedAt?.let { prev ->
+            java.time.Duration.between(
+                prev.toJavaLocalDateTime(),
+                msg.createdAt.toJavaLocalDateTime(),
+            ).toMinutes() >= 5
+        } ?: false
+        if (role == currentRole && hasTool == currentHasTool && !gapSplit) {
             currentIds.add(node.id)
         } else {
             flush()
@@ -1151,6 +1161,7 @@ private fun buildGroups(nodes: List<MessageNode>): List<ChatDisplayGroup> {
             currentHasTool = hasTool
             currentIds = mutableListOf(node.id)
         }
+        prevCreatedAt = msg.createdAt
     }
     flush()
     return groups
