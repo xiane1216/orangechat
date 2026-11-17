@@ -34,7 +34,7 @@ class KeepAliveRestartReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         when (intent?.action) {
             Intent.ACTION_BOOT_COMPLETED,
-            Intent.ACTION_QUICKBOOT_POWERON,
+            "android.intent.action.QUICKBOOT_POWERON",
             Intent.ACTION_MY_PACKAGE_REPLACED,
             KeepAliveService.ACTION_KEEP_ALIVE_WATCHDOG -> {
                 Log.d(TAG, "收到拉起事件: ${intent.action}")

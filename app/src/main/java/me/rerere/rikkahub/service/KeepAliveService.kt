@@ -238,10 +238,10 @@ class KeepAliveService : Service() {
                 val infos = wm.getWorkInfosForUniqueWork(
                     me.rerere.rikkahub.data.service.HeartbeatService.WORK_NAME
                 ).get()
-                val pending = infos.getOrNull()?.any {
+                val pending = infos.any {
                     it.state == androidx.work.WorkInfo.State.ENQUEUED ||
                         it.state == androidx.work.WorkInfo.State.RUNNING
-                } ?: false
+                }
                 if (!pending) {
                     me.rerere.rikkahub.data.service.HeartbeatService.scheduleNext(this, setting)
                     Log.d(TAG, "看门狗补排心跳任务")
