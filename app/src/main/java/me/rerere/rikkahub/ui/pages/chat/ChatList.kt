@@ -19,9 +19,11 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -34,6 +36,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +52,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
@@ -79,10 +83,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
@@ -115,7 +122,6 @@ import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.message.ChatMessageSideAvatar
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
-import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.utils.plus
@@ -134,6 +140,8 @@ fun ChatList(
     state: LazyListState,
     loading: Boolean,
     processingStatus: String? = null,
+    sendVisual: SendVisual? = null,
+    showReceivedHint: Boolean = false,
     previewMode: Boolean,
     settings: Settings,
     hazeState: HazeState,
@@ -178,6 +186,8 @@ fun ChatList(
                 state = state,
                 loading = loading,
                 processingStatus = processingStatus,
+                sendVisual = sendVisual,
+                showReceivedHint = showReceivedHint,
                 settings = settings,
                 hazeState = hazeState,
                 errors = errors,
@@ -209,6 +219,8 @@ private fun ChatListNormal(
     state: LazyListState,
     loading: Boolean,
     processingStatus: String? = null,
+    sendVisual: SendVisual?,
+    showReceivedHint: Boolean,
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError>,
@@ -312,13 +324,19 @@ private fun ChatListNormal(
             }
         }
 
-        // Filter out [SKIP] messages and proactive message context markers
+        // Filter out [SKIP] messages and proactive/heartbeat synthetic context markers.
+        // 心跳触发的合成 USER 消息标记是 "[心跳检查上下文]" (主动消息是 "[主动消息上下文]"),
+        // 漏过滤会让心跳回复前的合成触发消息以用户气泡混进列表, 导致心跳 assistant 组头像错位缺失
         val displayNodes = remember(conversation.messageNodes) {
             conversation.messageNodes.filter { node ->
                 val msg = node.currentMessage
                 val text = msg.toText().trim()
-                !(msg.role == MessageRole.ASSISTANT && text == "[SKIP]") &&
-                !(msg.role == MessageRole.USER && text.contains("[主动消息上下文]"))
+                val isSyntheticTrigger = msg.role == MessageRole.USER && (
+                    text.contains("[主动消息上下文]") ||
+                        text.contains("[心跳检查上下文]") ||
+                        text.startsWith("[现在是")
+                    )
+                !(msg.role == MessageRole.ASSISTANT && text == "[SKIP]") && !isSyntheticTrigger
             }
         }
 
@@ -360,11 +378,10 @@ private fun ChatListNormal(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    // AI 组头像在左, 用户组头像在右
+                    // AI 组头像在左 (所有 assistant 消息组一律带头像), 用户组头像在右
                     if (!isUserGroup) {
                         ChatMessageSideAvatar(
                             isUser = false,
-                            loading = loading && isLastGroup,
                             model = groupModel,
                             assistant = groupAssistant,
                         )
@@ -425,17 +442,27 @@ private fun ChatListNormal(
                                 )
                             }
                         }
-                        // 组末一条下方: "名字 时间" 小字
-                        ChatGroupMetaLine(
-                            group = group,
-                            assistant = groupAssistant,
-                            settings = settings,
-                        )
+                        // 组末一条下方: "名字 时间" 小字; 最新发送的用户消息组在状态动画期间
+                        // 改为显示 发送中/已送达 行, 动画结束(状态清空)后恢复 meta 小字
+                        val groupSendVisual = sendVisual?.takeIf {
+                            isUserGroup && groupNodes.any { node -> node.id == it.messageId }
+                        }
+                        if (groupSendVisual != null) {
+                            SendStatusLine(
+                                phase = groupSendVisual.phase,
+                                fontSizeRatio = settings.displaySetting.fontSizeRatio,
+                            )
+                        } else {
+                            ChatGroupMetaLine(
+                                group = group,
+                                assistant = groupAssistant,
+                                settings = settings,
+                            )
+                        }
                     }
                     if (isUserGroup) {
                         ChatMessageSideAvatar(
                             isUser = true,
-                            loading = loading && isLastGroup,
                             model = groupModel,
                             assistant = groupAssistant,
                         )
@@ -455,34 +482,37 @@ private fun ChatListNormal(
 
             if (loading) {
                 item(LoadingIndicatorKey) {
+                    // 等待动画: 组结构 (AI 头像 28dp 在左 + 右侧三个 6dp 粉点跳动), 不再用兔子
+                    val loadingAssistant = settings.getAssistantById(conversation.assistantId)
+                    val loadingModel = loadingAssistant?.chatModelId?.let { settings.findModelById(it) }
                     Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        if (settings.displaySetting.useAppIconStyleLoadingIndicator) {
-                            RabbitLoadingIndicator(
-                                modifier = Modifier.size(28.dp)
-                            )
-                        } else {
-                            // 三个 6dp 粉点上下跳 (相位差 0.15s)
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                BouncingLoadingDot(delayMillis = 0)
-                                BouncingLoadingDot(delayMillis = 150)
-                                BouncingLoadingDot(delayMillis = 300)
-                            }
-                        }
-                        AnimatedVisibility(
-                            visible = processingStatus != null,
+                        ChatMessageSideAvatar(
+                            isUser = false,
+                            model = loadingModel,
+                            assistant = loadingAssistant,
+                        )
+                        Row(
+                            modifier = Modifier.padding(top = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                text = processingStatus ?: "",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            // 三个 6dp 粉点上下跳 (相位差 0.15s)
+                            BouncingLoadingDot(delayMillis = 0)
+                            BouncingLoadingDot(delayMillis = 150)
+                            BouncingLoadingDot(delayMillis = 300)
+                            AnimatedVisibility(
+                                visible = processingStatus != null,
+                                modifier = Modifier.padding(start = 4.dp),
+                            ) {
+                                Text(
+                                    text = processingStatus ?: "",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
@@ -512,6 +542,27 @@ private fun ChatListNormal(
                     .align(Alignment.BottomCenter)
                     .zIndex(5f)
             )
+
+            // "他收到了" 提示: 生成开始时弹出一次, 1.2s 后淡出 (黑色半透明小胶囊, 居中于聊天区底部上方)
+            AnimatedVisibility(
+                visible = showReceivedHint,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -(64).dp)
+                    .zIndex(6f),
+                enter = fadeIn() + scaleIn(initialScale = 0.94f),
+                exit = fadeOut(),
+            ) {
+                Text(
+                    text = "他收到了",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF3B3735).copy(alpha = 0.78f))
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                )
+            }
 
             // 完成选择
             AnimatedVisibility(
@@ -934,6 +985,8 @@ private fun BoxScope.MessageJumper(
 }
 
 // 组末一条消息下方的 "名字 时间" 小字 (9sp 灰)
+// 对齐: AI 消息左对齐内容列起点 (与思考链行左缘一致), 用户消息靠右对齐内容列右缘;
+// 与气泡垂直间距 4dp; 字体/字号/颜色/格式保持原样不动
 @Composable
 private fun ChatGroupMetaLine(
     group: Pair<MessageRole, List<MessageNode>>,
@@ -959,16 +1012,90 @@ private fun ChatGroupMetaLine(
     }
     val metaText = if (name != null) "$name · $timeText" else timeText
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 2.dp),
+        // 与气泡的 4dp 垂直间距由父级 Column 的 spacedBy(4.dp) 提供, 这里不再叠加 padding
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
         Text(
             text = metaText,
             fontSize = 9.sp * fontSizeRatio,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.padding(start = if (!isUser) 36.dp else 0.dp),
+        )
+    }
+}
+
+// 发送状态行 (用户消息组末): 发送中 900ms -> 已送达 2s -> 500ms 淡出后换回 meta 小字
+// 样式对齐 v4 定稿: 9sp 小字 + 8dp 粉色描边转圈 / 9dp 绿勾 + 绿灰文字
+@Composable
+private fun SendStatusLine(
+    phase: SendPhase,
+    fontSizeRatio: Float,
+    modifier: Modifier = Modifier,
+) {
+    // FADING 阶段整行 500ms 淡出, 其余阶段保持可见
+    val lineAlpha by animateFloatAsState(
+        targetValue = if (phase == SendPhase.FADING) 0f else 1f,
+        animationSpec = tween(500),
+        label = "sendStateAlpha",
+    )
+    Row(
+        // 与气泡的 4dp 垂直间距由父级 Column 的 spacedBy(4.dp) 提供, 这里不再叠加 padding
+        modifier = modifier
+            .fillMaxWidth()
+            .alpha(lineAlpha),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (phase == SendPhase.SENDING) {
+            SendStateSpinner()
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = "发送中…",
+                fontSize = 9.sp * fontSizeRatio,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+        } else {
+            // SENT / FADING: 绿勾 + 已送达
+            Icon(
+                imageVector = HugeIcons.Tick01,
+                contentDescription = null,
+                tint = Color(0xFFA9BFA9),
+                modifier = Modifier.size(9.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = "已送达",
+                fontSize = 9.sp * fontSizeRatio,
+                color = Color(0xFFA9BFA9),
+            )
+        }
+    }
+}
+
+// 发送中转圈: 8dp 圆环, 灰色底环 + 玫瑰粉高亮弧 (700ms 线性旋转)
+@Composable
+private fun SendStateSpinner(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "sendRing")
+    val angle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700, easing = LinearEasing),
+        ),
+        label = "sendRingAngle",
+    )
+    Canvas(modifier = modifier.size(8.dp)) {
+        val stroke = 1.dp.toPx()
+        drawCircle(
+            color = Color(0xFFCFC7C1),
+            style = Stroke(width = stroke),
+        )
+        drawArc(
+            color = Color(0xFFC4958E),
+            startAngle = angle - 90f,
+            sweepAngle = 90f,
+            useCenter = false,
+            style = Stroke(width = stroke, cap = StrokeCap.Round),
         )
     }
 }

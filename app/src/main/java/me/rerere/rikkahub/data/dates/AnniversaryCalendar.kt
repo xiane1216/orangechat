@@ -11,6 +11,7 @@ import android.icu.util.Calendar
 import android.icu.util.TimeZone
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.MonthDay
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import me.rerere.rikkahub.data.datastore.DisplaySetting
@@ -42,34 +43,74 @@ object AnniversaryCalendar {
 
     private val WEEK_NAMES = arrayOf("一", "二", "三", "四", "五", "六", "日")
 
-    // 公历节日表 (月-日 -> 名称)
-    private val SOLAR_FESTIVALS: Map<Pair<Int, Int>, String> = mapOf(
-        (1 to 1) to "元旦",
-        (2 to 14) to "情人节",
-        (3 to 8) to "妇女节",
-        (3 to 12) to "植树节",
-        (5 to 1) to "劳动节",
-        (5 to 4) to "青年节",
-        (6 to 1) to "儿童节",
-        (7 to 1) to "建党节",
-        (8 to 1) to "建军节",
-        (9 to 10) to "教师节",
-        (10 to 1) to "国庆节",
-        (12 to 24) to "平安夜",
-        (12 to 25) to "圣诞节",
+    /**
+     * ICU ChineseCalendar 的纪元偏移: 公历年 = EXTENDED_YEAR - 2637。
+     *
+     * 注意不要用 2697: 那是"黄帝纪年"的约定, ICU 并不采用。曾经错用 2697 导致
+     * 公历年份被当成农历年换算时整体偏移 60 年, "距离生日"算出两万多天。
+     */
+    private const val ICU_CHINESE_EPOCH_OFFSET = 2637
+
+    /** 节日来源: 国内传统/法定节日 或 国外传入节日 */
+    enum class FestivalOrigin(val label: String) {
+        CN("国内"),
+        GLOBAL("国外"),
+    }
+
+    /** 节日 (名称 + 国内/国外标注) */
+    data class Festival(
+        val name: String,
+        val origin: FestivalOrigin,
     )
 
-    // 农历节日表 (农历月-日 -> 名称), 闰月不过节
-    private val LUNAR_FESTIVALS: Map<Pair<Int, Int>, String> = mapOf(
-        (1 to 1) to "春节",
-        (1 to 15) to "元宵节",
-        (2 to 2) to "龙头节",
-        (5 to 5) to "端午节",
-        (7 to 7) to "七夕",
-        (7 to 15) to "中元节",
-        (8 to 15) to "中秋节",
-        (9 to 9) to "重阳节",
-        (12 to 8) to "腊八节",
+    // 公历节日表 (月-日 -> 节日)
+    private val SOLAR_FESTIVALS: Map<Pair<Int, Int>, Festival> = mapOf(
+        // 国内
+        (1 to 1) to Festival("元旦", FestivalOrigin.CN),
+        (3 to 8) to Festival("妇女节", FestivalOrigin.CN),
+        (3 to 12) to Festival("植树节", FestivalOrigin.CN),
+        (5 to 1) to Festival("劳动节", FestivalOrigin.CN),
+        (5 to 4) to Festival("青年节", FestivalOrigin.CN),
+        (6 to 1) to Festival("儿童节", FestivalOrigin.CN),
+        (7 to 1) to Festival("建党节", FestivalOrigin.CN),
+        (8 to 1) to Festival("建军节", FestivalOrigin.CN),
+        (9 to 10) to Festival("教师节", FestivalOrigin.CN),
+        (10 to 1) to Festival("国庆节", FestivalOrigin.CN),
+        // 国外
+        (2 to 14) to Festival("情人节", FestivalOrigin.GLOBAL),
+        (3 to 14) to Festival("白色情人节", FestivalOrigin.GLOBAL),
+        (4 to 1) to Festival("愚人节", FestivalOrigin.GLOBAL),
+        (10 to 31) to Festival("万圣节", FestivalOrigin.GLOBAL),
+        (12 to 24) to Festival("平安夜", FestivalOrigin.GLOBAL),
+        (12 to 25) to Festival("圣诞节", FestivalOrigin.GLOBAL),
+    )
+
+    // 农历节日表 (农历月-日 -> 节日), 闰月不过节, 均为国内节日
+    private val LUNAR_FESTIVALS: Map<Pair<Int, Int>, Festival> = mapOf(
+        (1 to 1) to Festival("春节", FestivalOrigin.CN),
+        (1 to 15) to Festival("元宵节", FestivalOrigin.CN),
+        (2 to 2) to Festival("龙头节", FestivalOrigin.CN),
+        (5 to 5) to Festival("端午节", FestivalOrigin.CN),
+        (7 to 7) to Festival("七夕", FestivalOrigin.CN),
+        (7 to 15) to Festival("中元节", FestivalOrigin.CN),
+        (8 to 15) to Festival("中秋节", FestivalOrigin.CN),
+        (9 to 9) to Festival("重阳节", FestivalOrigin.CN),
+        (12 to 8) to Festival("腊八节", FestivalOrigin.CN),
+    )
+
+    // 规则节日 (某月第 n 个星期几), 均为国外节日
+    private data class RuleFestival(
+        val name: String,
+        val origin: FestivalOrigin,
+        val month: Int,
+        val dayOfWeek: DayOfWeek,
+        val nth: Int,
+    )
+
+    private val RULE_FESTIVALS = listOf(
+        RuleFestival("母亲节", FestivalOrigin.GLOBAL, 5, DayOfWeek.SUNDAY, 2),
+        RuleFestival("父亲节", FestivalOrigin.GLOBAL, 6, DayOfWeek.SUNDAY, 3),
+        RuleFestival("感恩节", FestivalOrigin.GLOBAL, 11, DayOfWeek.THURSDAY, 4),
     )
 
     // 24 节气名称, 从小寒开始, 按公历月份每两月一组的顺序排列
@@ -93,7 +134,7 @@ object AnniversaryCalendar {
         val cal = ChineseCalendar(TimeZone.getTimeZone(zone.id))
         cal.time = java.util.Date.from(date.atStartOfDay(zone).toInstant())
         return LunarDate(
-            year = cal.get(Calendar.EXTENDED_YEAR) - 2697,
+            year = cal.get(Calendar.EXTENDED_YEAR) - ICU_CHINESE_EPOCH_OFFSET,
             month = cal.get(Calendar.MONTH) + 1,
             day = cal.get(Calendar.DAY_OF_MONTH),
             isLeapMonth = cal.get(ChineseCalendar.IS_LEAP_MONTH) == 1,
@@ -115,7 +156,7 @@ object AnniversaryCalendar {
         return runCatching {
             val cal = ChineseCalendar(TimeZone.getTimeZone(zone.id))
             cal.clear()
-            cal.set(Calendar.EXTENDED_YEAR, lunarYear + 2697)
+            cal.set(Calendar.EXTENDED_YEAR, lunarYear + ICU_CHINESE_EPOCH_OFFSET)
             cal.set(Calendar.MONTH, lunarMonth - 1)
             cal.set(ChineseCalendar.IS_LEAP_MONTH, 0)
             cal.set(Calendar.DAY_OF_MONTH, 1)
@@ -159,28 +200,44 @@ object AnniversaryCalendar {
         }.getOrDefault("")
     }
 
-    // 当天节日列表 (公历节日 + 规则节日 + 农历节日 + 除夕), 无节日返回空列表
-    fun festivalsOn(today: LocalDate, zone: ZoneId = ZoneId.systemDefault()): List<String> {
-        val result = mutableListOf<String>()
+    // 当天节日列表 (公历节日 + 规则节日 + 农历节日 + 除夕, 每条带国内/国外标注), 无节日返回空列表
+    fun festivalsOn(today: LocalDate, zone: ZoneId = ZoneId.systemDefault()): List<Festival> {
+        val result = mutableListOf<Festival>()
         SOLAR_FESTIVALS[today.monthValue to today.dayOfMonth]?.let { result.add(it) }
-        // 规则节日
-        if (today == nthWeekdayOfMonth(today.year, 5, DayOfWeek.SUNDAY, 2)) result.add("母亲节")
-        if (today == nthWeekdayOfMonth(today.year, 6, DayOfWeek.SUNDAY, 3)) result.add("父亲节")
-        if (today == nthWeekdayOfMonth(today.year, 11, DayOfWeek.THURSDAY, 4)) result.add("感恩节")
+        // 规则节日 (如 5 月第 2 个周日 = 母亲节)
+        RULE_FESTIVALS.forEach { rule ->
+            if (today == nthWeekdayOfMonth(today.year, rule.month, rule.dayOfWeek, rule.nth)) {
+                result.add(Festival(rule.name, rule.origin))
+            }
+        }
         // 农历节日 (闰月不过节) 与除夕
         runCatching {
             val lunar = lunarOf(today, zone)
             if (!lunar.isLeapMonth) {
                 LUNAR_FESTIVALS[lunar.month to lunar.day]?.let { result.add(it) }
-                // 除夕 = 腊月最后一天, 即明天是正月初一
+                // 除夕 = 腊月最后一天, 即明天是正月初一 (跨年边界: 腊月总是落在公历次年 1 月下旬前后)
                 val tomorrow = lunarOf(today.plusDays(1), zone)
                 if (!tomorrow.isLeapMonth && tomorrow.month == 1 && tomorrow.day == 1) {
-                    result.add("除夕")
+                    result.add(Festival("除夕", FestivalOrigin.CN))
                 }
             }
         }
         return result
     }
+
+    // 设置页预览用: 代表性节日清单 (名称, 来源, 日期文案), 顺序即展示顺序
+    fun festivalSamples(): List<Triple<String, FestivalOrigin, String>> = listOf(
+        Triple("春节", FestivalOrigin.CN, "正月初一"),
+        Triple("七夕", FestivalOrigin.CN, "七月初七"),
+        Triple("中秋", FestivalOrigin.CN, "八月十五"),
+        Triple("除夕", FestivalOrigin.CN, "腊月最后一天"),
+        Triple("国庆节", FestivalOrigin.CN, "10月1日"),
+        Triple("情人节", FestivalOrigin.GLOBAL, "2月14日"),
+        Triple("白色情人节", FestivalOrigin.GLOBAL, "3月14日"),
+        Triple("母亲节", FestivalOrigin.GLOBAL, "5月第2个周日"),
+        Triple("感恩节", FestivalOrigin.GLOBAL, "11月第4个周四"),
+        Triple("圣诞节", FestivalOrigin.GLOBAL, "12月25日"),
+    )
 
     // 某月第 n 个指定星期几 (如 5 月第 2 个周日 = 母亲节)
     private fun nthWeekdayOfMonth(
@@ -232,17 +289,24 @@ object AnniversaryCalendar {
         return ChronoUnit.DAYS.between(start, today).toInt() + 1
     }
 
+    // 星期中文名, 如 "星期二"
+    fun weekName(date: LocalDate): String = "星期" + WEEK_NAMES[date.dayOfWeek.value - 1]
+
     /**
-     * 距离下一个生日还有几天
+     * 距离下一个生日还有几天, 返回 (距离天数, 是否就是今天); 优先农历生日, 其次阳历生日, 都未设置返回 null。
      *
-     * 返回 (距离天数, 是否就是今天); 优先使用农历生日, 其次阳历生日, 都未设置返回 null。
+     * 农历生日只有月/日没有年份。农历年与公历年的数字基本一一对应 (仅岁首落在公历 1 月下旬至 2 月中旬),
+     * 因此把公历年份数值近似当作农历年份, 从今年开始逐年把"农历 m 月 d 日"换算成公历日期,
+     * 取今天及以后最近的一个: 今年那次已经过了自然落到明年, 今天正好是生日则返回 0。
+     * 闰月一律按平月算 (solarOfLunar 内部固定 IS_LEAP_MONTH = 0), 腊月三十缺失的年份自动取腊月廿九。
      */
     fun daysUntilBirthday(display: DisplaySetting, today: LocalDate): Pair<Int, Boolean>? {
         val zone = ZoneId.systemDefault()
-        // 农历生日优先: 逐年换算成公历日期再取最近的一个
+        // 农历生日优先
         val lunarMonth = display.anniversaryLunarBirthdayMonth
         val lunarDay = display.anniversaryLunarBirthdayDay
         if (lunarMonth in 1..12 && lunarDay in 1..30) {
+            // 农历年 G 的"某月某日"最晚落在公历 G+1 年 1 月下旬, 多查一年 (G+2) 兜底
             val next = (today.year..today.year + 2)
                 .mapNotNull { solarOfLunar(it, lunarMonth, lunarDay, zone) }
                 .filter { !it.isBefore(today) }
@@ -253,15 +317,13 @@ object AnniversaryCalendar {
             }
             return null
         }
-        // 阳历生日
+        // 阳历生日: 用 MonthDay 表达"无年份的月日", 2月29日在非闰年自动顺延到下一个闰年
         val solarMonth = display.anniversarySolarBirthdayMonth
         val solarDay = display.anniversarySolarBirthdayDay
         if (solarMonth in 1..12 && solarDay in 1..31) {
+            val monthDay = MonthDay.of(solarMonth, solarDay)
             val next = (today.year..today.year + 2)
-                .mapNotNull { year ->
-                    val month = java.time.YearMonth.of(year, solarMonth)
-                    month.atDay(solarDay.coerceAtMost(month.lengthOfMonth()))
-                }
+                .mapNotNull { year -> runCatching { monthDay.atYear(year) }.getOrNull() }
                 .filter { !it.isBefore(today) }
                 .minOrNull()
             if (next != null) {
@@ -289,10 +351,10 @@ object AnniversaryCalendar {
             }
         )
 
-        // 节日行
+        // 节日行: 每条都带"国内/国外"前缀, 多个用、分隔
         val festivals = festivalsOn(today, zone)
         if (festivals.isNotEmpty()) {
-            lines.add("今日节日：" + festivals.joinToString("、"))
+            lines.add("今日节日：" + festivals.joinToString("、") { "${it.origin.label} ${it.name}" })
         }
 
         // 节气行
@@ -306,9 +368,9 @@ object AnniversaryCalendar {
         // 生日行
         daysUntilBirthday(display, today)?.let { (days, isToday) ->
             if (isToday) {
-                lines.add("今天是TA的生日")
+                lines.add("今天是宝宝的生日")
             } else {
-                lines.add("距离TA的生日还有${days}天")
+                lines.add("距离宝宝的生日还有${days}天")
             }
         }
 

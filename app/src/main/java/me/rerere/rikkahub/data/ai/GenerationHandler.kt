@@ -622,7 +622,8 @@ class GenerationHandler(
             aiLoggingManager.addLog(
                 AILogging.Generation(
                     params = params,
-                    messages = messages,
+                    // 记录转换后的实际请求消息 (含 <date_context> 等注入), 保证开发者日志所见即所发
+                    messages = internalMessages,
                     providerSetting = provider,
                     stream = true
                 )
@@ -648,7 +649,8 @@ class GenerationHandler(
             aiLoggingManager.addLog(
                 AILogging.Generation(
                     params = params,
-                    messages = messages,
+                    // 同上: 记录转换后的实际请求消息
+                    messages = internalMessages,
                     providerSetting = provider,
                     stream = false
                 )

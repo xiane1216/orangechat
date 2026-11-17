@@ -29,6 +29,9 @@ object DateContextTransformer : InputMessageTransformer {
         val today = LocalDate.now(ZoneId.systemDefault())
         val card = AnniversaryCalendar.buildDateCard(ctx.settings.displaySetting, today) ?: return messages
 
+        // 幂等保护: 最后一条消息已带卡片时不重复追加 (防同一条消息被转换两次)
+        if (messages.lastOrNull()?.toText()?.contains("<date_context>") == true) return messages
+
         val last = messages.lastOrNull()
             ?: return listOf(UIMessage.user(card))
         return if (last.role == MessageRole.USER) {

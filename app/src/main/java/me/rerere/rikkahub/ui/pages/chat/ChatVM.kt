@@ -18,12 +18,16 @@ import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -51,6 +55,15 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "ChatVM"
 
+// 发送状态动画阶段: 发送中 -> 已送达 -> 淡出 (对齐 v4 重播剧本)
+enum class SendPhase { SENDING, SENT, FADING }
+
+// 最新一条已发送用户消息的发送状态, UI 在其所在组末渲染状态行, 结束后恢复 meta 小字
+data class SendVisual(
+    val messageId: Uuid,
+    val phase: SendPhase,
+)
+
 class ChatVM(
     id: String,
     private val context: Application,
@@ -70,6 +83,19 @@ class ChatVM(
 
     // 待引用的消息, 发送下一条用户消息时作为 Quote 部分附带, 发送后清空
     var pendingQuote by mutableStateOf<UIMessagePart.Quote?>(null)
+
+    // 发送状态 (v4 重播): 只对最新发送的那条用户消息生效, 动画走完置 null 让 meta 正常显示
+    // 存在 ViewModel 里, 旋转/重建后状态与协程都能存活, 不会崩
+    var sendVisualState by mutableStateOf<SendVisual?>(null)
+        private set
+
+    private var sendVisualJob: Job? = null
+
+    // "他收到了" 一次性提示: 每次生成开始时置 true, 1.2s 后自动消失
+    var receivedHintVisible by mutableStateOf(false)
+        private set
+
+    private var receivedHintJob: Job? = null
 
     // 异步任务 (从ChatService获取，响应式)
     val conversationJob: StateFlow<Job?> =
@@ -96,6 +122,22 @@ class ChatVM(
 
         // 记住对话ID, 方便下次启动恢复
         context.writeStringPreference("lastConversationId", _conversationId.toString())
+
+        // 监听生成任务: 每次新生成开始 (出现新 Job) 时弹一次 "他收到了", 1.2s 后消失
+        viewModelScope.launch {
+            var previousJob: Job? = null
+            conversationJob.collect { job ->
+                if (job != null && job != previousJob) {
+                    receivedHintJob?.cancel()
+                    receivedHintVisible = true
+                    receivedHintJob = launch {
+                        delay(1200)
+                        receivedHintVisible = false
+                    }
+                }
+                previousJob = job
+            }
+        }
     }
 
     override fun onCleared() {
@@ -187,6 +229,35 @@ class ChatVM(
         pendingQuote = null
 
         if (finalContent.isEmptyInputMessage()) return
+
+        // 发送状态动画 (v4 重播): 记录发送前节点数, 等新用户消息落进会话后绑定其节点 id,
+        // 再按 发送中 900ms -> 已送达 2s -> 淡出 500ms 推进, 走完置 null 恢复 meta 小字。
+        // 连续发送时取消上一次动画, 只对最新发送的那条生效
+        val nodeCountBefore = conversation.value.messageNodes.size
+        sendVisualJob?.cancel()
+        sendVisualState = null
+        sendVisualJob = viewModelScope.launch {
+            val newNodeId = withTimeoutOrNull(5_000) {
+                chatService.getConversationFlow(_conversationId)
+                    .first { it.messageNodes.size > nodeCountBefore }
+                    .messageNodes
+                    .drop(nodeCountBefore)
+                    .firstOrNull { it.currentMessage.role == MessageRole.USER }
+                    ?.id
+            }
+            if (newNodeId == null) {
+                // 超时未追加成功 (发送被拦截), 直接收起状态行
+                sendVisualState = null
+                return@launch
+            }
+            sendVisualState = SendVisual(messageId = newNodeId, phase = SendPhase.SENDING)
+            delay(900)
+            sendVisualState = sendVisualState?.copy(phase = SendPhase.SENT)
+            delay(2_000)
+            sendVisualState = sendVisualState?.copy(phase = SendPhase.FADING)
+            delay(500)
+            sendVisualState = null
+        }
 
         chatService.sendMessage(_conversationId, finalContent, answer)
     }

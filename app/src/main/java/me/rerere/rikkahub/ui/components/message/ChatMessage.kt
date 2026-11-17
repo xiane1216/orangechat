@@ -951,7 +951,6 @@ private fun MessagePartsBlock(
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 ChatMessageSideAvatar(
                                     isUser = false,
-                                    loading = loading,
                                     model = model,
                                     assistant = assistant,
                                 )
@@ -989,7 +988,6 @@ private fun MessagePartsBlock(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ChatMessageSideAvatar(
                             isUser = false,
-                            loading = loading,
                             model = model,
                             assistant = assistant,
                         )

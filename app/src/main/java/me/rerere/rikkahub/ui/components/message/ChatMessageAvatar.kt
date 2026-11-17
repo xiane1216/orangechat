@@ -45,7 +45,6 @@ import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalSettings
-import me.rerere.rikkahub.ui.hooks.rememberAvatarShape
 import me.rerere.rikkahub.utils.toLocalString
 import java.io.File
 
@@ -223,17 +222,16 @@ fun ChatMessageAssistantAvatar(
     }
 }
 
-// 组结构用的小头像 (28dp 圆形): 用户组在右侧, AI 组在左侧, 由调用方决定摆放位置
+// 组结构用的小头像 (28dp 静态圆形): 用户组在右侧, AI 组在左侧, 由调用方决定摆放位置
+// 定稿 UI: 头像一律静态圆形, 不带加载中的形状旋转/波浪动画 (loading 参数已移除)
 @Composable
 fun ChatMessageSideAvatar(
     isUser: Boolean,
-    loading: Boolean,
     model: Model?,
     assistant: Assistant?,
     modifier: Modifier = Modifier,
 ) {
     val settings = LocalSettings.current
-    val shape = if (loading) rememberAvatarShape(true) else CircleShape
     Box(
         modifier = modifier.size(28.dp),
         contentAlignment = Alignment.Center,
@@ -242,7 +240,7 @@ fun ChatMessageSideAvatar(
             SideAvatarContent(
                 name = settings.displaySetting.userNickname,
                 avatar = settings.displaySetting.userAvatar,
-                shape = shape,
+                shape = CircleShape,
             )
             AvatarFrameOverlay(
                 framePath = settings.displaySetting.userAvatarFramePath,
@@ -257,7 +255,7 @@ fun ChatMessageSideAvatar(
                 SideAvatarContent(
                     name = assistant.name,
                     avatar = assistant.avatar,
-                    shape = shape,
+                    shape = CircleShape,
                 )
                 AvatarFrameOverlay(
                     framePath = settings.displaySetting.aiAvatarFramePath,
@@ -267,12 +265,12 @@ fun ChatMessageSideAvatar(
                     baseSize = 28f,
                 )
             } else if (model != null) {
-                // 模型图标
+                // 模型图标 (静态圆形, 不随加载旋转变形)
                 Box(contentAlignment = Alignment.Center) {
                     AutoAIIcon(
                         name = model.modelId,
                         modifier = Modifier.size(28.dp),
-                        loading = loading,
+                        loading = false,
                     )
                     AvatarFrameOverlay(
                         framePath = settings.displaySetting.aiAvatarFramePath,
@@ -287,7 +285,7 @@ fun ChatMessageSideAvatar(
                 SideAvatarContent(
                     name = assistant?.name.orEmpty(),
                     avatar = assistant?.avatar ?: Avatar.Dummy,
-                    shape = shape,
+                    shape = CircleShape,
                 )
             }
         }
