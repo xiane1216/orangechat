@@ -375,6 +375,8 @@ object AnniversaryCalendar {
         }
 
         if (lines.isEmpty()) return null
+        // 末尾附带使用说明, 避免模型把卡片当成用户刚说的内容而反复主动提起
+        lines.add("（以上是系统自动附带的背景信息，不是她说的话。平时自然聊天就好，不要主动汇报这些数字；只有节日当天、她生日临近或她自己问起时，才合适自然地提到。）")
         return "<date_context>\n${lines.joinToString("\n")}\n</date_context>"
     }
 }
