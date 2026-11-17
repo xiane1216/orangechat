@@ -517,7 +517,7 @@ private fun ChatPageContent(
                         .trim()
                     if (text.isNotEmpty()) {
                         vm.pendingQuote = UIMessagePart.Quote(
-                            quotedMessageId = message.id,
+                            quotedMessageId = message.id.toString(),
                             quotedAuthor = author,
                             quotedText = text.take(QUOTE_TEXT_MAX_LENGTH),
                         )

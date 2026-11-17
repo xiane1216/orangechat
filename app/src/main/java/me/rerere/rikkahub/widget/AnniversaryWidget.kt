@@ -19,17 +19,17 @@ import android.graphics.Typeface
 import android.util.Base64
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.Image
+import androidx.glance.ImageProvider
 import androidx.glance.LocalContext
 import androidx.glance.LocalSize
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.ImageProvider
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.provideContent
@@ -41,13 +41,12 @@ import androidx.glance.layout.ContentScale
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
-import androidx.glance.layout.Image
 import androidx.glance.layout.height
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.layout.width
+import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
-import androidx.glance.text.TextOverflow
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import kotlinx.coroutines.Dispatchers
@@ -396,17 +395,18 @@ class AnniversaryWidget : GlanceAppWidget() {
             )
             Spacer(modifier = GlanceModifier.width(12.dp))
             Column(modifier = GlanceModifier.defaultWeight()) {
+                val preview = state.lastMessage
+                    ?.let { if (it.length > 24) "${it.take(24)}…" else it }
+                    ?: state.dayCount?.let { day -> "第 $day 天" }
+                    ?: "在一起的日子还没设置"
                 Text(
-                    text = state.lastMessage
-                        ?: state.dayCount?.let { "第 $it 天" }
-                        ?: "在一起的日子还没设置",
+                    text = preview,
                     style = TextStyle(
                         color = ColorProvider(WIDGET_TEXT_MAIN),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                     ),
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 state.dayCount?.let { day ->
                     Spacer(modifier = GlanceModifier.height(2.dp))

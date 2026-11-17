@@ -300,7 +300,7 @@ object AnniversaryCalendar {
 
         // 在一起天数行
         daysTogether(display.anniversaryStartDate, today)?.let {
-            lines.add("我们在一起第$it天")
+            lines.add("我们在一起第${it}天")
         }
 
         // 生日行

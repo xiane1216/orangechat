@@ -901,17 +901,16 @@ private fun MessagePartsBlock(
                     val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
                     // 分头像时把思考与工具按连续段拆开, 各自带一个头像 (对应原型分阶段结构)
                     val stageRuns = remember(block.steps) {
-                        buildList {
-                            block.steps.forEach { step ->
-                                val isReasoning = step is ThinkingStep.ReasoningStep
-                                val lastRun = lastOrNull()
-                                if (lastRun != null && lastRun.first == isReasoning) {
-                                    lastRun.second.add(step)
-                                } else {
-                                    add(isReasoning to mutableListOf(step))
-                                }
+                        val runs = mutableListOf<Pair<Boolean, MutableList<ThinkingStep>>>()
+                        block.steps.forEach { step ->
+                            val isReasoning = step is ThinkingStep.ReasoningStep
+                            if (runs.isNotEmpty() && runs.last().first == isReasoning) {
+                                runs.last().second.add(step)
+                            } else {
+                                runs.add(isReasoning to mutableListOf(step))
                             }
                         }
+                        runs
                     }
                     val segments: List<List<ThinkingStep>> =
                         if (stageAvatar) stageRuns.map { it.second } else listOf(block.steps)

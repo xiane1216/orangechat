@@ -324,17 +324,16 @@ private fun ChatListNormal(
 
         // 消息分组: 相邻同角色消息合成一组再渲染 (组头一个头像, 组内气泡 4dp 间距)
         val displayGroups = remember(displayNodes) {
-            buildList {
-                displayNodes.forEach { node ->
-                    val role = node.currentMessage.role
-                    val lastGroup = lastOrNull()
-                    if (lastGroup != null && lastGroup.first == role) {
-                        lastGroup.second.add(node)
-                    } else {
-                        add(role to mutableListOf(node))
-                    }
+            val groups = mutableListOf<Pair<MessageRole, MutableList<MessageNode>>>()
+            displayNodes.forEach { node ->
+                val role = node.currentMessage.role
+                if (groups.isNotEmpty() && groups.last().first == role) {
+                    groups.last().second.add(node)
+                } else {
+                    groups.add(role to mutableListOf(node))
                 }
             }
+            groups
         }
 
         LazyColumn(

@@ -7,8 +7,7 @@
 package me.rerere.rikkahub.widget
 
 import android.content.Context
-import androidx.glance.appwidget.GlanceAppWidgetManager
-import androidx.glance.appwidget.update
+import androidx.glance.appwidget.updateAll
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -88,11 +87,7 @@ object AnniversaryWidgetUpdater {
      */
     suspend fun updateAllWidgets(context: Context) {
         runCatching {
-            val manager = GlanceAppWidgetManager(context)
-            val ids = manager.getGlanceIds(AnniversaryWidget::class.java)
-            ids.forEach { id ->
-                AnniversaryWidget().update(context, id)
-            }
+            AnniversaryWidget().updateAll(context)
         }
     }
 }

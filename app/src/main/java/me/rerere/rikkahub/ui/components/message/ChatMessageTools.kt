@@ -70,9 +70,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -370,9 +370,9 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 val unit = if (isSearchWeb) "条来源" else "条结果"
                 val resultCount: Int? = if (tool.isExecuted) {
                     runCatching {
-                        content.jsonObjectOrNull?.get("items")?.jsonArray?.size
-                            ?: content.jsonObjectOrNull?.get("urls")?.jsonArray?.size
-                            ?: content.jsonObjectOrNull?.get("total_files")
+                        content?.jsonObjectOrNull?.get("items")?.jsonArray?.size
+                            ?: content?.jsonObjectOrNull?.get("urls")?.jsonArray?.size
+                            ?: content?.jsonObjectOrNull?.get("total_files")
                                 ?.jsonPrimitiveOrNull?.contentOrNull?.toIntOrNull()
                     }.getOrNull()
                 } else {
