@@ -57,7 +57,8 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
                 currentThinkingSteps.add(ThinkingStep.ToolStep(part))
                 // v4: text_to_speech 工具 -> 抽出独立语音条 (紧跟工具环节之后)
                 if (part.toolName == "text_to_speech") {
-                    val ttsText = part.inputAsJson()["text"]
+                    val ttsText = (part.inputAsJson() as? kotlinx.serialization.json.JsonObject)
+                        ?.get("text")
                         ?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content.orEmpty()
                     if (ttsText.isNotBlank()) {
                         flushThinkingSteps()
