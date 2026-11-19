@@ -1204,11 +1204,19 @@ private fun MessagePartsBlock(
                             assistant = assistant,
                         )
                         Column(modifier = Modifier.weight(1f)) {
-                            TtsMessageBubble(text = block.text, bubbleAlpha = bubbleAlpha)
+                            TtsMessageBubble(
+                                text = block.text,
+                                bubbleAlpha = bubbleAlpha,
+                                maxBubbleWidth = maxBubbleWidth,
+                            )
                         }
                     }
                 } else {
-                    TtsMessageBubble(text = block.text, bubbleAlpha = bubbleAlpha)
+                    TtsMessageBubble(
+                        text = block.text,
+                        bubbleAlpha = bubbleAlpha,
+                        maxBubbleWidth = maxBubbleWidth,
+                    )
                 }
             }
 
@@ -1594,12 +1602,15 @@ internal fun AudioPlayerBubble(
 
 /**
  * TTS 语音条 (text_to_speech 工具): v4 定稿独立消息样式,
- * 外壳与 AI 气泡同款, 播放走系统 TTS 引擎, 波形按文本确定性生成
+ * 外壳与 AI 气泡完全同款 (宽度/圆角/毛玻璃/背景图/颜色/透明度全部跟随气泡设置),
+ * 唯一独立的是播放键圆圈颜色 (voicePlayButtonColor, 默认思考链爱心玫瑰粉),
+ * 播放走系统 TTS 引擎, 波形按文本确定性生成
  */
 @Composable
 private fun TtsMessageBubble(
     text: String,
     bubbleAlpha: Float = 1f,
+    maxBubbleWidth: Dp,
 ) {
     val displaySettings = LocalDisplaySettings.current
     val ttsState = LocalTTSState.current
@@ -1622,8 +1633,9 @@ private fun TtsMessageBubble(
         val rnd = java.util.Random(text.hashCode().toLong())
         List(48) { 0.15f + rnd.nextFloat() * 0.85f }
     }
-    val barWidth = (128 + estimatedSec * 6).dp.coerceIn(150.dp, 260.dp)
-    val playedColor = MaterialTheme.colorScheme.primary
+    // 播放键圆圈 + 已播放波形: 自定义色优先, 默认与思考链爱心同色系玫瑰粉
+    val playColor = displaySettings.voicePlayButtonColor?.let { it.toComposeColor() }
+        ?: Color(0xFFD3A9A3)
     val idleColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
 
     // 外壳与 AI 气泡完全同款: 毛玻璃/背景图/颜色/透明度全部跟随气泡设置
@@ -1634,19 +1646,17 @@ private fun TtsMessageBubble(
             ?: MaterialTheme.colorScheme.surfaceContainerHigh,
         overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
         bubbleAlpha = bubbleAlpha,
-        modifier = Modifier.widthIn(max = barWidth),
+        modifier = Modifier.widthIn(max = maxBubbleWidth),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
+                    .background(playColor)
                     .clickable {
                         when {
                             playbackState.status == PlaybackStatus.Playing -> ttsState.pause()
@@ -1678,7 +1688,7 @@ private fun TtsMessageBubble(
                 for (i in 0 until n) {
                     val barHeight = size.height * waveformBars[i % waveformBars.size].coerceIn(0.15f, 1f)
                     drawRoundRect(
-                        color = if (i < playedCount) playedColor else idleColor,
+                        color = if (i < playedCount) playColor else idleColor,
                         topLeft = Offset(i * (barW + gap), (size.height - barHeight) / 2f),
                         size = Size(barW, barHeight),
                         cornerRadius = CornerRadius(barW / 2f, barW / 2f)

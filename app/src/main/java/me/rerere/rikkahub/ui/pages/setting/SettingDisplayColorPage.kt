@@ -85,6 +85,7 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                         chatBackgroundColor = newBase.chatBackgroundColor,
                         primaryColor = newBase.primaryColor,
                         inputFieldColor = newBase.inputFieldColor,
+                        voicePlayButtonColor = newBase.voicePlayButtonColor,
                     )
                 )
             )
@@ -101,6 +102,7 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                         chatBackgroundColor = newBase.chatBackgroundColor,
                         primaryColor = newBase.primaryColor,
                         inputFieldColor = newBase.inputFieldColor,
+                        voicePlayButtonColor = newBase.voicePlayButtonColor,
                     )
                 )
             )
@@ -120,6 +122,7 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
     var showChatBackgroundColorPicker by remember { mutableStateOf(false) }
     var showPrimaryColorPicker by remember { mutableStateOf(false) }
     var showInputFieldColorPicker by remember { mutableStateOf(false) }
+    var showVoicePlayButtonColorPicker by remember { mutableStateOf(false) }
 
     if (showChatTextColorPicker) {
         ColorPickerDialog(
@@ -199,6 +202,14 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
             defaultColor = MaterialTheme.colorScheme.surfaceContainerLowest,
             onConfirm = { updateEditBase(editBase.copy(inputFieldColor = it)) },
             onDismiss = { showInputFieldColorPicker = false }
+        )
+    }
+    if (showVoicePlayButtonColorPicker) {
+        ColorPickerDialog(
+            initialColor = editBase.voicePlayButtonColor,
+            defaultColor = Color(0xFFD3A9A3),
+            onConfirm = { updateEditBase(editBase.copy(voicePlayButtonColor = it)) },
+            onDismiss = { showVoicePlayButtonColorPicker = false }
         )
     }
 
@@ -504,6 +515,26 @@ fun SettingDisplayColorPage(vm: SettingVM = koinViewModel()) {
                                 TextButton(onClick = { showInputFieldColorPicker = true }) { Text("自定义") }
                                 if (editBase.inputFieldColor != null) {
                                     TextButton(onClick = { updateEditBase(editBase.copy(inputFieldColor = null)) }) { Text("重置") }
+                                }
+                            }
+                        },
+                    )
+                    item(
+                        headlineContent = { Text("语音条播放键颜色") },
+                        supportingContent = { Text("TTS 语音条播放按钮圆圈与已播放波形的颜色, 默认玫瑰粉 (与思考链爱心同色系)") },
+                        trailingContent = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .background(
+                                            editBase.voicePlayButtonColor?.let { it.toComposeColor() } ?: Color(0xFFD3A9A3),
+                                            CircleShape
+                                        )
+                                )
+                                TextButton(onClick = { showVoicePlayButtonColorPicker = true }) { Text("自定义") }
+                                if (editBase.voicePlayButtonColor != null) {
+                                    TextButton(onClick = { updateEditBase(editBase.copy(voicePlayButtonColor = null)) }) { Text("重置") }
                                 }
                             }
                         },

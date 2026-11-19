@@ -745,6 +745,8 @@ data class DisplaySetting(
     val assistantBubbleImagePath: String = "",
     val bubbleCornerRadius: Float = 16f,
     val bubbleImageOverlayEnabled: Boolean = false, // 关=纯图片, 开=图片+主题色遮罩
+    // TTS 语音条播放键圆圈颜色 (null = 默认玫瑰粉 0xFFD3A9A3, 与思考链爱心同色系)
+    val voicePlayButtonColor: Long? = null,
     // 纪念日与生日 (时间感知注入 + 桌面小组件)
     val anniversaryEnabled: Boolean = true,
     val anniversaryLunarBirthdayMonth: Int = 0, // 农历生日 月 1-12, 0=未设置
@@ -781,6 +783,7 @@ data class ColorOverrideScheme(
     val chatBackgroundColor: Long? = null,
     val primaryColor: Long? = null,
     val inputFieldColor: Long? = null,
+    val voicePlayButtonColor: Long? = null,
 )
 
 /**
@@ -797,6 +800,7 @@ fun DisplaySetting.applyColorScheme(scheme: ColorOverrideScheme): DisplaySetting
     chatBackgroundColor = scheme.chatBackgroundColor ?: chatBackgroundColor,
     primaryColor = scheme.primaryColor ?: primaryColor,
     inputFieldColor = scheme.inputFieldColor ?: inputFieldColor,
+    voicePlayButtonColor = scheme.voicePlayButtonColor ?: voicePlayButtonColor,
 )
 
 /**
