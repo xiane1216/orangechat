@@ -1120,7 +1120,7 @@ private fun MessagePartsBlock(
                         if (stageAvatar) stageRuns.map { it.second } else listOf(block.steps)
                     // 分头像结构 (定稿 v4): 每个环节 (思考/工具/第二段思考) 各带一个头像,
                     // 环节之间留出呼吸间距, 像微信语音序列那样一列排下来
-                    val stageGap = 22.dp
+                    val stageGap = 12.dp
                     segments.forEachIndexed { segIndex, steps ->
                         val segmentContent: @Composable () -> Unit = {
                             ChainOfThought(
@@ -1213,7 +1213,7 @@ private fun MessagePartsBlock(
                 if (stageAvatar) {
                     // 回复阶段: 同样带头像, 与上方环节拉开呼吸间距
                     Row(
-                        modifier = Modifier.padding(top = 22.dp),
+                        modifier = Modifier.padding(top = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         ChatMessageSideAvatar(

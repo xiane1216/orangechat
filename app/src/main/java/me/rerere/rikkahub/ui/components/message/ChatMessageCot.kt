@@ -53,6 +53,14 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
 
             is UIMessagePart.Tool -> {
                 currentThinkingSteps.add(ThinkingStep.ToolStep(part))
+                // v4: 工具返回的语音抽出来, 作为消息流中的独立语音条 (紧跟工具环节之后)
+                val audios = part.output.filterIsInstance<UIMessagePart.Audio>()
+                if (audios.isNotEmpty()) {
+                    flushThinkingSteps()
+                    audios.forEachIndexed { audioIdx, audio ->
+                        result.add(MessagePartBlock.ContentBlock(audio, -(index * 100 + audioIdx + 1)))
+                    }
+                }
             }
 
             else -> {
