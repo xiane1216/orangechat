@@ -222,7 +222,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     }
     var showResult by remember { mutableStateOf(false) }
     var showDenyDialog by remember { mutableStateOf(false) }
-    var expanded by remember { mutableStateOf(true) }
+    // 工具参数/结果默认收起, 点击步骤行手动展开 (审批按钮在 extra 标题行, 不受展开影响)
+    var expanded by remember { mutableStateOf(false) }
     val eventBus: AppEventBus = koinInject()
     val scope = rememberCoroutineScope()
     val isPending = tool.approvalState is ToolApprovalState.Pending
