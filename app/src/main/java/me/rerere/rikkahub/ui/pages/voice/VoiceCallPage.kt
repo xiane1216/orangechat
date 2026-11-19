@@ -304,6 +304,32 @@ fun VoiceCallPage(
                     .padding(horizontal = 20.dp),
             )
 
+            // 对TA称呼编辑
+            if (showTitleEdit) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showTitleEdit = false },
+                    title = { Text("修改称呼") },
+                    text = {
+                        androidx.compose.material3.OutlinedTextField(
+                            value = titleDraft,
+                            onValueChange = { titleDraft = it },
+                            singleLine = true,
+                            label = { Text("对TA的称呼") },
+                        )
+                    },
+                    confirmButton = {
+                        androidx.compose.material3.TextButton(onClick = {
+                            val v = titleDraft.trim().ifEmpty { "Daddy" }
+                            scope.launch { settingsStore.update { it.copy(displaySetting = it.displaySetting.copy(partnerTitle = v)) } }
+                            showTitleEdit = false
+                        }) { Text("保存") }
+                    },
+                    dismissButton = {
+                        androidx.compose.material3.TextButton(onClick = { showTitleEdit = false }) { Text("取消") }
+                    },
+                )
+            }
+
             // 底部按钮: 麦克风 / 翻译 / 挂断 / 外放
             Row(
                 horizontalArrangement = Arrangement.spacedBy(28.dp),
@@ -648,32 +674,6 @@ private fun SubtitleCard(
                     translation = uiState.assistantTranslation,
                 )
             }
-        }
-
-        // 对TA称呼编辑
-        if (showTitleEdit) {
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = { showTitleEdit = false },
-                title = { Text("修改称呼") },
-                text = {
-                    androidx.compose.material3.OutlinedTextField(
-                        value = titleDraft,
-                        onValueChange = { titleDraft = it },
-                        singleLine = true,
-                        label = { Text("对TA的称呼") },
-                    )
-                },
-                confirmButton = {
-                    androidx.compose.material3.TextButton(onClick = {
-                        val v = titleDraft.trim().ifEmpty { "Daddy" }
-                        scope.launch { settingsStore.update { it.copy(displaySetting = it.displaySetting.copy(partnerTitle = v)) } }
-                        showTitleEdit = false
-                    }) { Text("保存") }
-                },
-                dismissButton = {
-                    androidx.compose.material3.TextButton(onClick = { showTitleEdit = false }) { Text("取消") }
-                },
-            )
         }
     }
 }
