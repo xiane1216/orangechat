@@ -638,6 +638,10 @@ private fun ExportedChatMessage(
                             }
                         }
                     }
+
+                    is MessagePartBlock.TtsBlock -> {
+                        // TTS 语音条暂不参与图片导出
+                    }
                 }
             }
         }

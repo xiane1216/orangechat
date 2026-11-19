@@ -139,6 +139,7 @@ import me.rerere.rikkahub.ui.context.LocalHazeState
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalTTSState
+import me.rerere.tts.model.PlaybackStatus
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.HazeStyle
@@ -1190,6 +1191,27 @@ private fun MessagePartsBlock(
                 }
             }
 
+            is MessagePartBlock.TtsBlock -> {
+                // v4: TTS 语音条作为独立消息, 跟随 AI 气泡外壳, 带头像
+                if (stageAvatar) {
+                    Row(
+                        modifier = Modifier.padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ChatMessageSideAvatar(
+                            isUser = false,
+                            model = model,
+                            assistant = assistant,
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            TtsMessageBubble(text = block.text, bubbleAlpha = bubbleAlpha)
+                        }
+                    }
+                } else {
+                    TtsMessageBubble(text = block.text, bubbleAlpha = bubbleAlpha)
+                }
+            }
+
             is MessagePartBlock.ContentBlock -> {
                 val content: @Composable () -> Unit = {
                     key(block.index) {
@@ -1569,7 +1591,117 @@ internal fun AudioPlayerBubble(
         }
     }
 }
- 
+
+/**
+ * TTS 语音条 (text_to_speech 工具): v4 定稿独立消息样式,
+ * 外壳与 AI 气泡同款, 播放走系统 TTS 引擎, 波形按文本确定性生成
+ */
+@Composable
+private fun TtsMessageBubble(
+    text: String,
+    bubbleAlpha: Float = 1f,
+) {
+    val displaySettings = LocalDisplaySettings.current
+    val ttsState = LocalTTSState.current
+    val playbackState by ttsState.playbackState.collectAsState()
+    val isSpeaking by ttsState.isSpeaking.collectAsState()
+    val playing = isSpeaking && playbackState.status == PlaybackStatus.Playing
+
+    // 时长估算: TTS 中文约 4 字/秒, 限 2~180 秒
+    val estimatedSec = (text.length / 4).coerceIn(2, 180)
+    val progress = if (playing && playbackState.durationMs > 0) {
+        (playbackState.positionMs.toFloat() / playbackState.durationMs).coerceIn(0f, 1f)
+    } else 0f
+    val displaySec = if (playing && playbackState.durationMs > 0) {
+        ((playbackState.durationMs - playbackState.positionMs) / 1000).toInt().coerceAtLeast(0)
+    } else {
+        estimatedSec
+    }
+
+    val waveformBars = remember(text) {
+        val rnd = java.util.Random(text.hashCode().toLong())
+        List(48) { 0.15f + rnd.nextFloat() * 0.85f }
+    }
+    val barWidth = (128 + estimatedSec * 6).dp.coerceIn(150.dp, 260.dp)
+    val playedColor = MaterialTheme.colorScheme.primary
+    val idleColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+
+    // 外壳与 AI 气泡完全同款: 毛玻璃/背景图/颜色/透明度全部跟随气泡设置
+    BubbleSurface(
+        imagePath = displaySettings.assistantBubbleImagePath,
+        cornerRadius = displaySettings.bubbleCornerRadius.dp,
+        color = displaySettings.assistantBubbleColor?.let { it.toComposeColor() }
+            ?: MaterialTheme.colorScheme.surfaceContainerHigh,
+        overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
+        bubbleAlpha = bubbleAlpha,
+        modifier = Modifier.widthIn(max = barWidth),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable {
+                        when {
+                            playbackState.status == PlaybackStatus.Playing -> ttsState.pause()
+                            isSpeaking -> ttsState.resume()
+                            else -> ttsState.speak(text)
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (playing) HugeIcons.PauseCircle else HugeIcons.PlayCircle,
+                    contentDescription = if (playing) "Pause" else "Play",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Canvas(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(22.dp)
+            ) {
+                val barW = 2.dp.toPx()
+                val gap = 2.5.dp.toPx()
+                val n = ((size.width + gap) / (barW + gap)).toInt().coerceIn(6, 48)
+                val playedCount = (progress * n).toInt()
+                for (i in 0 until n) {
+                    val barHeight = size.height * waveformBars[i % waveformBars.size].coerceIn(0.15f, 1f)
+                    drawRoundRect(
+                        color = if (i < playedCount) playedColor else idleColor,
+                        topLeft = Offset(i * (barW + gap), (size.height - barHeight) / 2f),
+                        size = Size(barW, barHeight),
+                        cornerRadius = CornerRadius(barW / 2f, barW / 2f)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            Text(
+                text = String.format(
+                    java.util.Locale.US, "%d:%02d", displaySec / 60, displaySec % 60
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                fontSize = 12.sp,
+                modifier = Modifier.width(34.dp),
+                textAlign = TextAlign.End
+            )
+        }
+    }
+}
+
 @Composable
 internal fun VoiceMessageBubble(
     voiceMessage: UIMessagePart.VoiceMessage,

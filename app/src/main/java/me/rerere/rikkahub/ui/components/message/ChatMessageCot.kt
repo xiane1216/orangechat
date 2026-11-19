@@ -28,6 +28,8 @@ sealed interface ThinkingStep {
 sealed interface MessagePartBlock {
     data class ThinkingBlock(val steps: List<ThinkingStep>) : MessagePartBlock
     data class ContentBlock(val part: UIMessagePart, val index: Int) : MessagePartBlock
+    /** text_to_speech 工具: 语音条作为独立消息渲染 (v4 定稿) */
+    data class TtsBlock(val text: String, val index: Int) : MessagePartBlock
 }
 
 /**
@@ -53,12 +55,21 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
 
             is UIMessagePart.Tool -> {
                 currentThinkingSteps.add(ThinkingStep.ToolStep(part))
-                // v4: 工具返回的语音抽出来, 作为消息流中的独立语音条 (紧跟工具环节之后)
+                // v4: text_to_speech 工具 -> 抽出独立语音条 (紧跟工具环节之后)
+                if (part.toolName == "text_to_speech") {
+                    val ttsText = part.inputAsJson()["text"]
+                        ?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content.orEmpty()
+                    if (ttsText.isNotBlank()) {
+                        flushThinkingSteps()
+                        result.add(MessagePartBlock.TtsBlock(ttsText, -(index * 100 + 1)))
+                    }
+                }
+                // 工具返回的音频文件同样抽出, 作为消息流中的独立语音条
                 val audios = part.output.filterIsInstance<UIMessagePart.Audio>()
                 if (audios.isNotEmpty()) {
                     flushThinkingSteps()
                     audios.forEachIndexed { audioIdx, audio ->
-                        result.add(MessagePartBlock.ContentBlock(audio, -(index * 100 + audioIdx + 1)))
+                        result.add(MessagePartBlock.ContentBlock(audio, -(index * 100 + audioIdx + 10)))
                     }
                 }
             }
