@@ -71,6 +71,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.surfaceColorAtElevation
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1030,7 +1031,7 @@ private fun ChatGroupMetaLine(
                     .clickable {
                         if (!ttsSpeaking) {
                             val text = lastMessage.toText()
-                            val textToSpeak = if (settings.ttsOnlyReadQuoted) {
+                            val textToSpeak = if (settings.displaySetting.ttsOnlyReadQuoted) {
                                 text.extractQuotedContentAsText() ?: text
                             } else {
                                 text

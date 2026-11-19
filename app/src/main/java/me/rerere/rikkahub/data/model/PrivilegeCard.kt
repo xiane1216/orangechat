@@ -100,12 +100,12 @@ object PrivilegeCards {
         append("情侣特权卡系统（小乖特权卡），两人互发的特权券。")
         append("${title}的卡（side=daddy，宝宝发给${title}，由${title}使用）：")
         DADDY.forEachIndexed { i, c ->
-            val d = c.withTitle(title)
+            val d = PrivilegeCards.withTitle(c, title)
             append(if (i > 0) "；" else "").append("${d.id}=${d.name}（${d.desc}）")
         }
         append("。宝宝的卡（side=baby，${title}发给宝宝，由宝宝使用）：")
         BABY.forEachIndexed { i, c ->
-            val d = c.withTitle(title)
+            val d = PrivilegeCards.withTitle(c, title)
             append(if (i > 0) "；" else "").append("${d.id}=${d.name}（${d.desc}）")
         }
         append("。")

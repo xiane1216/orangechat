@@ -569,6 +569,7 @@ private fun SubtitleCard(
 ) {
     val listState = rememberLazyListState()
     val history = uiState.subtitleHistory
+    val partnerTitle = LocalDisplaySettings.current.partnerTitle
 
     // 历史新增时平滑滚动到底部 (用最后一条的 id 而不是 size, 避免同尺寸更新错过滚动)
     LaunchedEffect(history.lastOrNull()?.id, history.size) {

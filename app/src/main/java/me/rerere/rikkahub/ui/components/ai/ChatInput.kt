@@ -1038,7 +1038,7 @@ private fun FullScreenEditor(
                         shape = RoundedCornerShape(32.dp),
                         placeholder = {
                             Text(
-                                "Message to ${displaySettings.partnerTitle}...",
+                                "Message to ${LocalDisplaySettings.current.partnerTitle}...",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                             )
                         },

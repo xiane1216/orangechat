@@ -1213,7 +1213,7 @@ private fun MessagePartsBlock(
                 if (stageAvatar) {
                     // 回复阶段: 同样带头像, 与上方环节拉开呼吸间距
                     Row(
-                        modifier = Modifier.padding(top = stageGap),
+                        modifier = Modifier.padding(top = 22.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         ChatMessageSideAvatar(
