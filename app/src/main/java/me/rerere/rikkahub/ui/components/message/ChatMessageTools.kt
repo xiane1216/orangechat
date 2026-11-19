@@ -320,6 +320,22 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     }
 
     // 判断是否有额外内容需要显示
+    // 兜底: 非内置渲染的自定义工具 (如 privilege_cards) 执行完且拿到了 JSON 结果时也可展开,
+    // 展开区会显示通用结果摘要 (见下方 content 渲染), 修复"点已完成 xxx 看不到任何内容"的问题
+    val hasCustomRender = when (tool.toolName) {
+        ToolNames.MEMORY,
+        ToolNames.SEARCH_WEB,
+        ToolNames.SCRAPE_WEB,
+        ToolNames.TTS,
+        ToolNames.ZIP_FILES,
+        ToolNames.WRITE_FILES,
+        ToolNames.WORKSPACE_READ_FILE,
+        ToolNames.WORKSPACE_WRITE_FILE,
+        ToolNames.WORKSPACE_EDIT_FILE,
+        ToolNames.WORKSPACE_SHELL,
+        -> true
+        else -> false
+    }
     val hasExtraContent = when (tool.toolName) {
         ToolNames.MEMORY -> memoryAction in listOf(MemoryActions.CREATE, MemoryActions.EDIT) &&
             content.getStringContent("content") != null
@@ -334,7 +350,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         ToolNames.WORKSPACE_WRITE_FILE -> arguments.getStringContent("text") != null
         ToolNames.WORKSPACE_EDIT_FILE -> workspaceEditDiffOf(tool) != null
         ToolNames.WORKSPACE_SHELL -> content != null
-        else -> false
+        else -> tool.isExecuted && content != null && !hasCustomRender
     } || isDenied || images.isNotEmpty() || audios.isNotEmpty()
 
     ControlledChainOfThoughtStep(
@@ -478,10 +494,15 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         )
                     }
                     if (tool.toolName == ToolNames.TTS) {
+                        // 定稿 v4: 工具胶囊里只显示"他说了什么", 不再放语音条;
+                        // 生成的语音在下方正式消息流里播放
                         val text = arguments.getStringContent("text") ?: ""
-                        TtsVoiceBar(
+                        Text(
                             text = text,
-                            onReplay = { scope.launch { eventBus.emit(AppEvent.Speak(text)) } }
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     if ((tool.toolName == ToolNames.ZIP_FILES || tool.toolName == ToolNames.WRITE_FILES) && tool.isExecuted && content != null) {
@@ -636,13 +657,6 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             }
                         }
                     }
-                    if (audios.isNotEmpty()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            audios.fastForEach { audio ->
-                                AudioPlayerBubble(url = audio.url)
-                            }
-                        }
-                    }
                     if (isDenied) {
                         val reason = (tool.approvalState as ToolApprovalState.Denied).reason
                         Text(
@@ -650,6 +664,37 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                 if (reason.isNotBlank()) ": $reason" else "",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    // 通用兜底: 非内置渲染的自定义工具 (如 privilege_cards / 婚礼插件等)
+                    // 展示结果里的 message/success/error 摘要, 没有"查看详情"也能直接看到干了什么
+                    if (!hasCustomRender && tool.isExecuted && content != null) {
+                        val summaryText = remember(content) {
+                            val obj = content.jsonObject
+                            val preferred = listOf("message", "error")
+                                .mapNotNull { obj[it]?.jsonPrimitive?.contentOrNull }
+                                .firstOrNull { it.isNotBlank() }
+                            val success = obj["success"]?.jsonPrimitive?.booleanOrNull
+                            when {
+                                !preferred.isNullOrBlank() ->
+                                    (if (success == false) "失败：" else "") + preferred
+                                else -> {
+                                    val raw = content.toString().replace("\n", " ").trim()
+                                    if (raw.length > 120) raw.take(120) + "…" else raw
+                                }
+                            }
+                        }
+                        Text(
+                            text = summaryText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (content.jsonObject["success"]?.jsonPrimitive?.booleanOrNull == false) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            },
+                            modifier = Modifier.shimmer(isLoading = loading),
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     // 查看完整输入输出详情 (原步骤行点击行为移到这里)
@@ -992,7 +1037,11 @@ private fun GenericToolPreview(
                                 modifier = Modifier.fillMaxWidth(),
                             )
 
-                            is UIMessagePart.Audio -> AudioPlayerBubble(url = part.url)
+                            is UIMessagePart.Audio -> Text(
+                                text = "语音已生成，在下方消息里播放",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            )
 
                             else -> {}
                         }
@@ -1229,102 +1278,6 @@ private data class AskUserQuestion(
     val options: List<String>,
     val selectionType: String = "text", // "text" | "single" | "multi"
 )
-
-@Composable
-private fun TtsVoiceBar(
-    text: String,
-    onReplay: () -> Unit
-) {
-    val ttsState = LocalTTSState.current
-    val playbackState by ttsState.playbackState.collectAsState()
-    val isSpeaking by ttsState.isSpeaking.collectAsState()
-
-    val progress = if (playbackState.durationMs > 0) {
-        playbackState.positionMs.toFloat() / playbackState.durationMs
-    } else 0f
-
-    val waveformBars = remember(text) {
-        val rnd = java.util.Random(text.hashCode().toLong())
-        List(24) { 0.2f + rnd.nextFloat() * 0.8f }
-    }
-
-    val activeColor = MaterialTheme.colorScheme.primary
-    val inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
-
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f))
-            .padding(horizontal = 3.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Play / Pause button
-        Box(
-            modifier = Modifier
-                .size(22.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary)
-                .clickable {
-                    when (playbackState.status) {
-                        PlaybackStatus.Playing -> ttsState.pause()
-                        else -> if (isSpeaking) ttsState.resume() else onReplay()
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = if (playbackState.status == PlaybackStatus.Playing) HugeIcons.Pause else HugeIcons.Play,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(12.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(4.dp))
-
-        // Waveform
-        Canvas(
-            modifier = Modifier
-                .weight(1f)
-                .height(18.dp)
-        ) {
-            val barCount = waveformBars.size
-            val totalWidth = size.width
-            val barWidth = 2f
-            val gap = (totalWidth - barWidth * barCount) / (barCount - 1).coerceAtLeast(1)
-            val playedBarCount = (progress * barCount).toInt()
-
-            waveformBars.forEachIndexed { index, barRatio ->
-                val barHeight = size.height * barRatio.coerceIn(0.2f, 1f)
-                val x = index * (barWidth + gap)
-                val y = (size.height - barHeight) / 2f
-                drawRoundRect(
-                    color = if (index < playedBarCount) activeColor else inactiveColor,
-                    topLeft = androidx.compose.ui.geometry.Offset(x, y),
-                    size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(1f, 1f)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.width(4.dp))
-
-        // Duration
-        val remainingSec = if (isSpeaking && playbackState.durationMs > 0) {
-            ((playbackState.durationMs - playbackState.positionMs) / 1000).toInt().coerceAtLeast(0)
-        } else {
-            text.length / 5
-        }
-        Text(
-            text = String.format("%d:%02d", remainingSec / 60, remainingSec % 60),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            fontSize = 10.sp,
-            modifier = Modifier.width(28.dp),
-            textAlign = TextAlign.End
-        )
-    }
-}
 
 @Composable
 private fun ToolDenyReasonDialog(

@@ -899,7 +899,7 @@ private fun TextInputRow(
             shape = RoundedCornerShape(22.dp),
             placeholder = {
                 Text(
-                    stringResource(R.string.chat_input_placeholder),
+                    "Message to ${displaySettings.partnerTitle}...",
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                 )
             },
@@ -1038,7 +1038,7 @@ private fun FullScreenEditor(
                         shape = RoundedCornerShape(32.dp),
                         placeholder = {
                             Text(
-                                stringResource(R.string.chat_input_placeholder),
+                                "Message to ${displaySettings.partnerTitle}...",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                             )
                         },

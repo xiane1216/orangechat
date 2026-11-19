@@ -32,14 +32,17 @@ private const val TAG = "PrivilegeCardTool"
  *
  * 通过 SettingsStore 在 execute 时读写最新数据（而非构建工具时的快照），
  * 避免 UI 手动调整与 AI 操作互相覆盖。
+ * 卡名/规则里的称呼跟随显示设置的对TA称呼（默认 Daddy -> "爸爸"）。
  */
 fun createPrivilegeCardTool(
     context: Context,
     settingsStore: SettingsStore,
-): Tool = Tool(
+): Tool {
+    val title = PrivilegeCards.resolveTitle(settingsStore.settingsFlow.value.displaySetting.partnerTitle)
+    return Tool(
     name = "privilege_cards",
     description = buildString {
-        append(PrivilegeCards.ruleText())
+        append(PrivilegeCards.ruleText(title))
         append("操作：operation=list 查看双方所有卡的品种/数量/说明；operation=use 使用一张卡（side+card，数量减1，不足则失败）；operation=grant 发放或调整数量（side+card+count，正数加卡、负数减卡）。")
         append("规范：使用或发放卡牌必须调用本工具记账，不可口头承诺不记账；宝宝要求用卡时先核对数量；grant 用于奖励、纪念日或宝宝协商请求，不要滥发。")
     },
@@ -54,7 +57,7 @@ fun createPrivilegeCardTool(
                 putJsonObject("side") {
                     put("type", "string")
                     putJsonArray("enum") { add("daddy"); add("baby") }
-                    put("description", "卡牌归属方：daddy=爸爸的卡（爸爸使用），baby=宝宝的卡（宝宝使用）。use/grant 必填")
+                    put("description", "卡牌归属方：daddy=${title}的卡（${title}使用），baby=宝宝的卡（宝宝使用）。use/grant 必填")
                 }
                 putJsonObject("card") {
                     put("type", "string")
@@ -88,19 +91,21 @@ fun createPrivilegeCardTool(
                         put("success", true)
                         putJsonObject("daddy_cards") {
                             PrivilegeCards.DADDY.forEach {
+                                val d = PrivilegeCards.withTitle(it, title)
                                 put(it.id, buildJsonObject {
-                                    put("name", it.name)
+                                    put("name", d.name)
                                     put("count", setting.countOf(it.side, it.id))
-                                    put("desc", it.desc)
+                                    put("desc", d.desc)
                                 })
                             }
                         }
                         putJsonObject("baby_cards") {
                             PrivilegeCards.BABY.forEach {
+                                val d = PrivilegeCards.withTitle(it, title)
                                 put(it.id, buildJsonObject {
-                                    put("name", it.name)
+                                    put("name", d.name)
                                     put("count", setting.countOf(it.side, it.id))
-                                    put("desc", it.desc)
+                                    put("desc", d.desc)
                                 })
                             }
                         }
@@ -118,10 +123,11 @@ fun createPrivilegeCardTool(
                     } else {
                         val setting = settingsStore.settingsFlow.value.privilegeCardSetting
                         val current = setting.countOf(card.side, card.id)
+                        val cardName = PrivilegeCards.withTitle(card, title).name
                         if (current <= 0) {
                             listOf(UIMessagePart.Text(buildJsonObject {
                                 put("success", false)
-                                put("error", "「${card.name}」已经用完了，无法使用（可考虑 grant 补卡）")
+                                put("error", "「$cardName」已经用完了，无法使用（可考虑 grant 补卡）")
                             }.toString()))
                         } else {
                             val newLog = PrivilegeCardLog(
@@ -137,10 +143,10 @@ fun createPrivilegeCardTool(
                             listOf(UIMessagePart.Text(buildJsonObject {
                                 put("success", true)
                                 put("action", "use")
-                                put("card", card.name)
+                                put("card", cardName)
                                 put("remaining", current - 1)
                                 if (note.isNotBlank()) put("note", note)
-                                put("message", "已使用一张「${card.name}」，剩余 ${current - 1} 张。请依照卡牌规则行动。")
+                                put("message", "已使用一张「$cardName」，剩余 ${current - 1} 张。请依照卡牌规则行动。")
                             }.toString()))
                         }
                     }
@@ -172,13 +178,14 @@ fun createPrivilegeCardTool(
                         )
                         settingsStore.update { it.copy(privilegeCardSetting = newSetting) }
                         Logging.log(TAG, "AI granted ${newCount - current} x ${card.side}/${card.id}")
+                        val cardName = PrivilegeCards.withTitle(card, title).name
                         listOf(UIMessagePart.Text(buildJsonObject {
                             put("success", true)
                             put("action", "grant")
-                            put("card", card.name)
+                            put("card", cardName)
                             put("remaining", newCount)
                             if (note.isNotBlank()) put("note", note)
-                            put("message", "「${card.name}」${if (newCount - current >= 0) "+" else ""}${newCount - current} 张，现有 $newCount 张")
+                            put("message", "「$cardName」${if (newCount - current >= 0) "+" else ""}${newCount - current} 张，现有 $newCount 张")
                         }.toString()))
                     }
                 }
@@ -196,4 +203,6 @@ fun createPrivilegeCardTool(
             }.toString()))
         }
     }
-)
+    )
+    }
+}

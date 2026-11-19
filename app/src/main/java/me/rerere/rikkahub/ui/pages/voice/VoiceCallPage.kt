@@ -79,7 +79,12 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Mic01
 import me.rerere.hugeicons.stroke.Translate
 import me.rerere.hugeicons.stroke.VolumeHigh
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.service.VoiceCallService
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.context.LocalDisplaySettings
+import org.koin.compose.koinInject
+import kotlinx.coroutines.launch
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionRecordAudio
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import java.io.File
@@ -101,6 +106,11 @@ fun VoiceCallPage(
 ) {
     val context = LocalContext.current
     var boundService by remember { mutableStateOf<VoiceCallService?>(null) }
+    val partnerTitle = LocalDisplaySettings.current.partnerTitle
+    val settingsStore: SettingsStore = koinInject()
+    var showTitleEdit by remember { mutableStateOf(false) }
+    var titleDraft by remember { mutableStateOf(partnerTitle) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     val asrPermission = rememberPermissionState(PermissionRecordAudio)
 
@@ -202,14 +212,15 @@ fun VoiceCallPage(
             // 顶部留白, 把所有内容往下挪
             Spacer(modifier = Modifier.size(72.dp))
 
-            // 名字 "Daddy" — 细体 + 字间距 + 发光
+            // 名字 (对TA称呼, 可点击修改) — 细体 + 字间距 + 发光
             Text(
-                text = "Daddy",
+                text = partnerTitle,
                 color = if (isDark) Color(0xFFFFFFFF) else Color(0xFF1A1A1A),
                 fontSize = 30.sp,
                 fontWeight = FontWeight.Light,
                 letterSpacing = 6.sp,
                 textAlign = TextAlign.Center,
+                modifier = Modifier.clickable { showTitleEdit = true },
                 style = androidx.compose.ui.text.TextStyle(
                     shadow = androidx.compose.ui.graphics.Shadow(
                         color = if (isDark) Color(0x66FFFFFF) else Color(0x33000000),
@@ -630,12 +641,38 @@ private fun SubtitleCard(
                 uiState.assistantText.isNotBlank()
             ) {
                 LiveSubtitle(
-                    name = "Daddy",
+                    name = partnerTitle,
                     nameColor = Color(0xFF8A8F9C),
                     text = uiState.assistantText,
                     translation = uiState.assistantTranslation,
                 )
             }
+        }
+
+        // 对TA称呼编辑
+        if (showTitleEdit) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showTitleEdit = false },
+                title = { Text("修改称呼") },
+                text = {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = titleDraft,
+                        onValueChange = { titleDraft = it },
+                        singleLine = true,
+                        label = { Text("对TA的称呼") },
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        val v = titleDraft.trim().ifEmpty { "Daddy" }
+                        scope.launch { settingsStore.update { it.copy(displaySetting = it.displaySetting.copy(partnerTitle = v)) } }
+                        showTitleEdit = false
+                    }) { Text("保存") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { showTitleEdit = false }) { Text("取消") }
+                },
+            )
         }
     }
 }
@@ -645,7 +682,8 @@ private fun SubtitleItem(
     entry: SubtitleEntry,
     onReplay: (String) -> Unit,
 ) {
-    val name = if (entry.isAssistant) "Daddy" else "宝宝"
+    val partnerTitle = LocalDisplaySettings.current.partnerTitle
+    val name = if (entry.isAssistant) partnerTitle else "宝宝"
     val nameColor = if (entry.isAssistant) Color(0xFF8A8F9C) else Color(0xFFC98A8A)
     val time = remember(entry.timestamp) {
         java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())

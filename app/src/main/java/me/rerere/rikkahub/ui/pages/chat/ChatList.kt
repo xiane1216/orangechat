@@ -15,6 +15,10 @@ import me.rerere.hugeicons.stroke.ArrowUpDouble
 import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.StopCircle
+import me.rerere.hugeicons.stroke.VolumeHigh
+import me.rerere.rikkahub.ui.context.LocalTTSState
+import me.rerere.rikkahub.utils.extractQuotedContentAsText
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -998,18 +1002,47 @@ private fun ChatGroupMetaLine(
         null
     }
     val metaText = if (name != null) "$name · $timeText" else timeText
+    // AI 消息: 小字旁的朗读小喇叭 (与菜单里的朗读同逻辑, 从气泡菜单挪出)
+    val tts = if (isUser) null else LocalTTSState.current
+    val ttsSpeaking = tts?.isSpeaking?.collectAsState()?.value == true
+    val ttsAvailable = tts?.isAvailable?.collectAsState()?.value == true
+    val metaColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
     Row(
         // 与气泡的 2dp 垂直间距由父级 Column 的 spacedBy(2.dp) 提供, 这里不再叠加 padding
         modifier = modifier
             .fillMaxWidth()
             .padding(start = startPadding),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = metaText,
             fontSize = 9.sp * fontSizeRatio,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            color = metaColor,
         )
+        if (tts != null && ttsAvailable) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Icon(
+                imageVector = if (ttsSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
+                contentDescription = if (ttsSpeaking) "停止朗读" else "朗读",
+                modifier = Modifier
+                    .size(9.dp * fontSizeRatio)
+                    .clickable {
+                        if (!ttsSpeaking) {
+                            val text = lastMessage.toText()
+                            val textToSpeak = if (settings.ttsOnlyReadQuoted) {
+                                text.extractQuotedContentAsText() ?: text
+                            } else {
+                                text
+                            }
+                            tts.speak(textToSpeak)
+                        } else {
+                            tts.stop()
+                        }
+                    },
+                tint = metaColor,
+            )
+        }
     }
 }
 

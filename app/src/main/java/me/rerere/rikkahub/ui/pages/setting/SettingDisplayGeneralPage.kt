@@ -9,12 +9,17 @@ package me.rerere.rikkahub.ui.pages.setting
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,7 +35,9 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
+import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -51,6 +58,11 @@ fun SettingDisplayGeneralPage(vm: SettingVM = koinViewModel()) {
         "create_new_conversation_on_start",
         true
     )
+
+    // 对TA称呼编辑
+    val titleEditState = useEditState<String> { newValue ->
+        updateDisplaySetting(displaySetting.copy(partnerTitle = newValue.trim().ifEmpty { "Daddy" }))
+    }
 
     Scaffold(
         topBar = {
@@ -96,8 +108,49 @@ fun SettingDisplayGeneralPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
+                    item(
+                        headlineContent = { Text("对TA的称呼") },
+                        supportingContent = {
+                            Text("输入框、语音通话、特权卡里对TA的称呼，默认 Daddy")
+                        },
+                        trailingContent = {
+                            Text(
+                                text = displaySetting.partnerTitle,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        },
+                        onClick = { titleEditState.open(displaySetting.partnerTitle) },
+                    )
                 }
             }
         }
+    }
+
+    // 称呼编辑对话框
+    titleEditState.EditStateContent { value, onUpdate ->
+        AlertDialog(
+            onDismissRequest = { titleEditState.dismiss() },
+            title = { Text("对TA的称呼") },
+            text = {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = onUpdate,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("Daddy") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { titleEditState.confirm() }) {
+                    Text(stringResource(R.string.chat_page_save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { titleEditState.dismiss() }) {
+                    Text(stringResource(R.string.chat_page_cancel))
+                }
+            }
+        )
     }
 }

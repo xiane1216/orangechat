@@ -22,6 +22,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,12 +64,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -134,6 +137,7 @@ import me.rerere.rikkahub.ui.components.ui.toComposeColor
 import me.rerere.rikkahub.ui.context.LocalDisplaySettings
 import me.rerere.rikkahub.ui.context.LocalHazeState
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import dev.chrisbanes.haze.hazeEffect
@@ -204,6 +208,8 @@ fun ChatMessage(
     )
     var showActionsSheet by remember { mutableStateOf(false) }
     var showSelectCopySheet by remember { mutableStateOf(false) }
+    // 用户消息"重新生成"确认弹窗 (会删除该消息之后的分支)
+    var showUserRegenConfirm by remember { mutableStateOf(false) }
     // 点气泡快捷菜单: showBubbleMenu 控制显隐, bubbleMenuBlockIndex 记录锚定在哪个内容块 (气泡) 上
     var showBubbleMenu by remember { mutableStateOf(false) }
     var bubbleMenuBlockIndex by remember { mutableIntStateOf(-1) }
@@ -277,6 +283,14 @@ fun ChatMessage(
                                     },
                                 )
                                 CompactBubbleMenuItem(
+                                    text = "重新生成",
+                                    icon = HugeIcons.Refresh03,
+                                    onClick = {
+                                        showBubbleMenu = false
+                                        showUserRegenConfirm = true
+                                    },
+                                )
+                                CompactBubbleMenuItem(
                                     text = "多选",
                                     icon = HugeIcons.Share04,
                                     onClick = {
@@ -285,28 +299,6 @@ fun ChatMessage(
                                     },
                                 )
                             } else {
-                                val tts = LocalTTSState.current
-                                val isSpeaking by tts.isSpeaking.collectAsState()
-                                val isAvailable by tts.isAvailable.collectAsState()
-                                CompactBubbleMenuItem(
-                                    text = if (isSpeaking) "停止朗读" else "朗读",
-                                    icon = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
-                                    enabled = isAvailable,
-                                    onClick = {
-                                        showBubbleMenu = false
-                                        if (!isSpeaking) {
-                                            val text = message.toText()
-                                            val textToSpeak = if (settings.ttsOnlyReadQuoted) {
-                                                text.extractQuotedContentAsText() ?: text
-                                            } else {
-                                                text
-                                            }
-                                            tts.speak(textToSpeak)
-                                        } else {
-                                            tts.stop()
-                                        }
-                                    },
-                                )
                                 if (onTranslate != null) {
                                     CompactBubbleMenuItem(
                                         text = "翻译",
@@ -375,6 +367,22 @@ fun ChatMessage(
             onDismissRequest = {
                 showTranslateDialog = false
             },
+        )
+    }
+
+    // 用户消息重新生成确认
+    if (showUserRegenConfirm) {
+        RikkaConfirmDialog(
+            show = true,
+            title = "重新生成",
+            confirmText = "重新发送",
+            dismissText = "取消",
+            onConfirm = {
+                showUserRegenConfirm = false
+                onRegenerate()
+            },
+            onDismiss = { showUserRegenConfirm = false },
+            text = { Text("会撤回这条消息并删除它后面的回复，然后重新发送") },
         )
     }
 
@@ -808,7 +816,7 @@ private fun MessageContentBlock(
         }
 
         is UIMessagePart.Audio -> {
-            AudioPlayerBubble(url = part.url)
+            AudioPlayerBubble(url = part.url, bubbleAlpha = bubbleAlpha)
         }
 
         is UIMessagePart.VoiceMessage -> {
@@ -1110,7 +1118,10 @@ private fun MessagePartsBlock(
                     }
                     val segments: List<List<ThinkingStep>> =
                         if (stageAvatar) stageRuns.map { it.second } else listOf(block.steps)
-                    segments.forEach { steps ->
+                    // 分头像结构 (定稿 v4): 每个环节 (思考/工具/第二段思考) 各带一个头像,
+                    // 环节之间留出呼吸间距, 像微信语音序列那样一列排下来
+                    val stageGap = 22.dp
+                    segments.forEachIndexed { segIndex, steps ->
                         val segmentContent: @Composable () -> Unit = {
                             ChainOfThought(
                                 modifier = Modifier.animateContentSize(),
@@ -1125,6 +1136,7 @@ private fun MessagePartsBlock(
                                                 model = model,
                                                 assistant = assistant,
                                                 collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                                                onLongClick = onBubbleLongClick,
                                             )
                                         }
                                     }
@@ -1143,19 +1155,36 @@ private fun MessagePartsBlock(
                                 }
                             }
                         }
-                        if (stageAvatar) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                ChatMessageSideAvatar(
-                                    isUser = false,
-                                    model = model,
-                                    assistant = assistant,
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    segmentContent()
+                        when {
+                            stageAvatar && segIndex == 0 -> {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    ChatMessageSideAvatar(
+                                        isUser = false,
+                                        model = model,
+                                        assistant = assistant,
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        segmentContent()
+                                    }
                                 }
                             }
-                        } else {
-                            segmentContent()
+                            stageAvatar -> {
+                                // 后续环节: 同样带头像, 与上一环节拉开呼吸间距
+                                Row(
+                                    modifier = Modifier.padding(top = stageGap),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    ChatMessageSideAvatar(
+                                        isUser = false,
+                                        model = model,
+                                        assistant = assistant,
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        segmentContent()
+                                    }
+                                }
+                            }
+                            else -> segmentContent()
                         }
                     }
                 }
@@ -1182,8 +1211,11 @@ private fun MessagePartsBlock(
                     }
                 }
                 if (stageAvatar) {
-                    // 分头像: 回复阶段自己带一个头像
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // 回复阶段: 同样带头像, 与上方环节拉开呼吸间距
+                    Row(
+                        modifier = Modifier.padding(top = stageGap),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         ChatMessageSideAvatar(
                             isUser = false,
                             model = model,
@@ -1357,163 +1389,184 @@ private fun BubbleSurface(
 }
  
 @Composable
-@Suppress("UnusedCrossTarget")
-internal fun AudioPlayerBubble(url: String) {
+internal fun AudioPlayerBubble(
+    url: String,
+    bubbleAlpha: Float = 1f,
+) {
     val context = LocalContext.current
+    val displaySettings = LocalDisplaySettings.current
     var isPlaying by remember { mutableStateOf(false) }
+    var isPrepared by remember { mutableStateOf(false) }
     var durationMs by remember { mutableIntStateOf(0) }
     var currentMs by remember { mutableIntStateOf(0) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
-    var isPrepared by remember { mutableStateOf(false) }
- 
-    // Generate pseudo-random waveform bar heights (deterministic per url)
+
+    // 异步读音频时长: 宽度按时长自适应, 短语音是短条 (定稿 v4)
+    LaunchedEffect(url) {
+        if (durationMs > 0) return@LaunchedEffect
+        runCatching {
+            val retriever = android.media.MediaMetadataRetriever()
+            retriever.setDataSource(context, android.net.Uri.parse(url))
+            val d = retriever.extractMetadata(
+                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
+            )?.toLongOrNull() ?: 0L
+            retriever.release()
+            if (d > 0) durationMs = d.toInt()
+        }
+    }
+
+    fun toggle() {
+        errorMsg = null
+        if (isPlaying) {
+            mediaPlayer?.pause()
+            isPlaying = false
+            return
+        }
+        if (mediaPlayer != null && isPrepared) {
+            mediaPlayer?.start()
+            isPlaying = true
+            return
+        }
+        mediaPlayer?.release()
+        mediaPlayer = null
+        val mp = MediaPlayer()
+        try {
+            mp.setDataSource(context, android.net.Uri.parse(url))
+            mp.prepare()
+            durationMs = mp.duration
+            mp.setOnCompletionListener {
+                isPlaying = false
+                currentMs = 0
+            }
+            mp.start()
+            isPlaying = true
+            isPrepared = true
+            mediaPlayer = mp
+        } catch (e: Exception) {
+            mp.release()
+            errorMsg = "播放失败，点一下重试"
+        }
+    }
+
+    // 波形: 按 url 确定性生成, 短语音短条长语音封顶
     val waveformBars = remember(url) {
         val rnd = java.util.Random(url.hashCode().toLong())
-        List(40) { 0.15f + rnd.nextFloat() * 0.85f }
+        List(48) { 0.15f + rnd.nextFloat() * 0.85f }
     }
- 
     val progress = if (durationMs > 0) currentMs.toFloat() / durationMs else 0f
- 
+    val barWidth = (128 + (durationMs / 1000) * 6).dp.coerceIn(150.dp, 260.dp)
+    val playedColor = MaterialTheme.colorScheme.primary
+    val idleColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+
     DisposableEffect(Unit) {
         onDispose {
             mediaPlayer?.release()
             mediaPlayer = null
         }
     }
- 
-    // Progress ticker
+
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
             mediaPlayer?.let {
-                if (it.isPlaying) {
-                    currentMs = it.currentPosition
-                }
+                if (it.isPlaying) currentMs = it.currentPosition
             }
             kotlinx.coroutines.delay(50)
         }
     }
- 
-    // Animate waveform bars when playing
-    val animatedBars = remember { mutableStateOf(waveformBars) }
-    LaunchedEffect(isPlaying, progress) {
-        if (isPlaying) {
-            val rnd = java.util.Random()
-            val newBars = waveformBars.mapIndexed { index, base ->
-                val playedRatio = if (progress > 0f) index.toFloat() / waveformBars.size else 0f
-                if (playedRatio <= progress) {
-                    // Already played bars stay at original height
-                    base
-                } else {
-                    // Upcoming bars get slight animation
-                    base * (0.85f + rnd.nextFloat() * 0.3f)
-                }
-            }
-            animatedBars.value = newBars
-        } else {
-            animatedBars.value = waveformBars
-        }
-    }
- 
-    val activeColor = MaterialTheme.colorScheme.primary
-    val inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
- 
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.secondaryContainer)
-            .padding(start = 4.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+
+    // 外壳与 AI 气泡完全同款: 毛玻璃/背景图/颜色/透明度全部跟随气泡设置
+    BubbleSurface(
+        imagePath = displaySettings.assistantBubbleImagePath,
+        cornerRadius = displaySettings.bubbleCornerRadius.dp,
+        color = displaySettings.assistantBubbleColor?.let { it.toComposeColor() }
+            ?: MaterialTheme.colorScheme.surfaceContainerHigh,
+        overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
+        bubbleAlpha = bubbleAlpha,
+        modifier = Modifier.widthIn(max = barWidth),
     ) {
-        // Play / Pause button
-        Box(
+        Column(
             modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary)
-                .clickable {
-                    if (isPlaying) {
-                        mediaPlayer?.pause()
-                        isPlaying = false
-                    } else {
-                        if (mediaPlayer == null || !isPrepared) {
-                            val mp = MediaPlayer()
-                            try {
-                                val uri = android.net.Uri.parse(url)
-                                mp.setDataSource(context, uri)
-                                mp.prepare()
-                                durationMs = mp.duration
-                                mp.setOnCompletionListener {
-                                    isPlaying = false
-                                    currentMs = 0
+                .fillMaxWidth()
+                .padding(start = 4.dp, end = 10.dp, top = 6.dp, bottom = 6.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .clickable { toggle() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isPlaying) HugeIcons.PauseCircle else HugeIcons.PlayCircle,
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Canvas(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(22.dp)
+                        .pointerInput(durationMs) {
+                            detectTapGestures { offset ->
+                                if (durationMs > 0) {
+                                    val ratio = (offset.x / size.width).coerceIn(0f, 1f)
+                                    val target = (ratio * durationMs).toInt()
+                                    mediaPlayer?.seekTo(target)
+                                    currentMs = target
                                 }
-                                mp.start()
-                                isPlaying = true
-                                isPrepared = true
-                                mediaPlayer = mp
-                            } catch (e: Exception) {
-                                mp.release()
                             }
-                        } else {
-                            mediaPlayer?.start()
-                            isPlaying = true
                         }
+                ) {
+                    val barW = 2.dp.toPx()
+                    val gap = 2.5.dp.toPx()
+                    val n = ((size.width + gap) / (barW + gap)).toInt().coerceIn(6, 48)
+                    val playedCount = (progress * n).toInt()
+                    for (i in 0 until n) {
+                        val barHeight = size.height * waveformBars[i % waveformBars.size].coerceIn(0.15f, 1f)
+                        drawRoundRect(
+                            color = if (i < playedCount) playedColor else idleColor,
+                            topLeft = Offset(i * (barW + gap), (size.height - barHeight) / 2f),
+                            size = Size(barW, barHeight),
+                            cornerRadius = CornerRadius(barW / 2f, barW / 2f)
+                        )
                     }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = if (isPlaying) HugeIcons.PauseCircle else HugeIcons.PlayCircle,
-                contentDescription = if (isPlaying) "Pause" else "Play",
-                tint = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(22.dp)
-            )
-        }
- 
-        Spacer(modifier = Modifier.width(8.dp))
- 
-        // Waveform bars
-        Canvas(
-            modifier = Modifier
-                .weight(1f)
-                .height(28.dp)
-                .clickable { /* click waveform to seek (optional future) */ }
-        ) {
-            val barCount = animatedBars.value.size
-            val totalWidth = size.width
-            val barWidth = 2.5f
-            val gap = (totalWidth - barWidth * barCount) / (barCount - 1).coerceAtLeast(1)
-            val playedBarCount = (progress * barCount).toInt()
- 
-            animatedBars.value.forEachIndexed { index, barRatio ->
-                val barHeight = size.height * barRatio.coerceIn(0.15f, 1f)
-                val x = index * (barWidth + gap)
-                val y = (size.height - barHeight) / 2f
-                drawRoundRect(
-                    color = if (index < playedBarCount) activeColor else inactiveColor,
-                    topLeft = androidx.compose.ui.geometry.Offset(x, y),
-                    size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5f, 1.5f)
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                val displaySec = if (isPlaying || currentMs > 0) {
+                    ((durationMs - currentMs) / 1000).coerceAtLeast(0)
+                } else {
+                    durationMs / 1000
+                }
+                Text(
+                    text = String.format(
+                        java.util.Locale.US, "%d:%02d", displaySec / 60, displaySec % 60
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.width(34.dp),
+                    textAlign = TextAlign.End
+                )
+            }
+            if (errorMsg != null) {
+                Text(
+                    text = errorMsg ?: "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 3.dp)
                 )
             }
         }
- 
-        Spacer(modifier = Modifier.width(6.dp))
- 
-        // Duration text
-        val displaySec = if (isPlaying || currentMs > 0) {
-            val remaining = (durationMs - currentMs) / 1000
-            remaining.coerceAtLeast(0)
-        } else {
-            durationMs / 1000
-        }
-        Text(
-            text = String.format("%d:%02d", displaySec / 60, displaySec % 60),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            fontSize = 13.sp,
-            modifier = Modifier.width(36.dp),
-            textAlign = TextAlign.End
-        )
     }
 }
  

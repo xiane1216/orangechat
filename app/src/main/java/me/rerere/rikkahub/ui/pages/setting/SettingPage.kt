@@ -295,7 +295,10 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.SettingPrivilegeCard) },
                         leadingContent = { Icon(HugeIcons.Ticket01, null) },
-                        supportingContent = { Text("情侣特权券：爸爸的卡与宝宝的卡，AI 聊天中自动查卡/用卡/发卡") },
+                        supportingContent = {
+                            val t = me.rerere.rikkahub.data.model.PrivilegeCards.resolveTitle(settings.displaySetting.partnerTitle)
+                            Text("情侣特权券：${t}的卡与宝宝的卡，AI 聊天中自动查卡/用卡/发卡")
+                        },
                         headlineContent = { Text("小乖特权卡") },
                     )
                     item(

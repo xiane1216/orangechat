@@ -57,6 +57,21 @@ object PrivilegeCards {
     const val SIDE_BABY = "baby"
     const val DEFAULT_COUNT = 3
 
+    /** 卡牌文案里的内置称呼 (私货): "爸爸"。替换成用户自定义称呼时按此匹配 */
+    private const val BUILTIN_TITLE = "爸爸"
+
+    /**
+     * 由显示设置里的 partnerTitle 派生特权卡称呼:
+     * 默认 "Daddy" (未自定义) 时保持私货 "爸爸", 自定义后直接用自定义值。
+     */
+    fun resolveTitle(partnerTitle: String): String =
+        partnerTitle.trim().ifEmpty { "Daddy" }.let { if (it == "Daddy") BUILTIN_TITLE else it }
+
+    /** 把卡名/说明里的内置称呼替换为自定义称呼 (卡名如 "爸爸听话卡" -> "老公听话卡") */
+    fun withTitle(def: PrivilegeCardDef, title: String): PrivilegeCardDef =
+        if (title == BUILTIN_TITLE) def
+        else def.copy(name = def.name.replace(BUILTIN_TITLE, title), desc = def.desc.replace(BUILTIN_TITLE, title))
+
     /** 爸爸的卡：宝宝发给爸爸，由爸爸使用 */
     val DADDY = listOf(
         PrivilegeCardDef("calm", SIDE_DADDY, "消气卡", "爸爸使用后，宝宝要消气，跟爸爸好好说话、好好沟通"),
@@ -80,13 +95,19 @@ object PrivilegeCards {
     fun find(side: String, cardId: String): PrivilegeCardDef? =
         ALL.find { it.side == side && it.id == cardId }
 
-    /** 工具描述：十种卡的完整规则（渲染进系统提示词，注意保持紧凑） */
-    fun ruleText(): String = buildString {
+    /** 工具描述：十种卡的完整规则（渲染进系统提示词，注意保持紧凑）；title = 自定义称呼 */
+    fun ruleText(title: String = BUILTIN_TITLE): String = buildString {
         append("情侣特权卡系统（小乖特权卡），两人互发的特权券。")
-        append("爸爸的卡（side=daddy，宝宝发给爸爸，由爸爸使用）：")
-        DADDY.forEachIndexed { i, c -> append(if (i > 0) "；" else "").append("${c.id}=${c.name}（${c.desc}）") }
-        append("。宝宝的卡（side=baby，爸爸发给宝宝，由宝宝使用）：")
-        BABY.forEachIndexed { i, c -> append(if (i > 0) "；" else "").append("${c.id}=${c.name}（${c.desc}）") }
+        append("${title}的卡（side=daddy，宝宝发给${title}，由${title}使用）：")
+        DADDY.forEachIndexed { i, c ->
+            val d = c.withTitle(title)
+            append(if (i > 0) "；" else "").append("${d.id}=${d.name}（${d.desc}）")
+        }
+        append("。宝宝的卡（side=baby，${title}发给宝宝，由宝宝使用）：")
+        BABY.forEachIndexed { i, c ->
+            val d = c.withTitle(title)
+            append(if (i > 0) "；" else "").append("${d.id}=${d.name}（${d.desc}）")
+        }
         append("。")
     }
 }

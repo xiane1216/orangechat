@@ -97,6 +97,8 @@ fun SettingPrivilegeCardPage(vm: SettingVM = koinInject()) {
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val setting = settings.privilegeCardSetting
     var showResetDialog by remember { mutableStateOf(false) }
+    // 卡名/说明里的称呼跟随显示设置的对TA称呼（默认 Daddy -> "爸爸"）
+    val title = PrivilegeCards.resolveTitle(settings.displaySetting.partnerTitle)
 
     fun adjust(side: String, card: PrivilegeCardDef, delta: Int) {
         val s = settings.privilegeCardSetting
@@ -160,8 +162,8 @@ fun SettingPrivilegeCardPage(vm: SettingVM = koinInject()) {
                             headlineContent = { Text("怎么玩") },
                             supportingContent = {
                                 Text(
-                                    "爸爸的卡由你发给他，他在关键时刻使用（消气、和好、亲亲抱抱、哄睡、认错）；" +
-                                        "宝宝的卡由他发给你，你用他必须认（无敌、熬夜、玩游戏、陪朋友、爸爸听话）。" +
+                                    "${title}的卡由你发给他，他在关键时刻使用（消气、和好、亲亲抱抱、哄睡、认错）；" +
+                                        "宝宝的卡由他发给你，你用他必须认（无敌、熬夜、玩游戏、陪朋友、${title}听话）。" +
                                         "在聊天里说「我要用熬夜卡」或「给你发一张和好卡」，他会自动用工具记账。下面的加减号用于你手动补卡或扣卡。"
                                 )
                             }
@@ -169,26 +171,27 @@ fun SettingPrivilegeCardPage(vm: SettingVM = koinInject()) {
                     }
                 }
 
-                // 爸爸的卡
+                // TA的卡
                 item {
-                    SectionHeader(title = "爸爸的卡", tint = DaddyTint, icon = Lucide.Crown, subtitle = "我发给他的 · 由爸爸使用")
+                    SectionHeader(title = "${title}的卡", tint = DaddyTint, icon = Lucide.Crown, subtitle = "我发给他的 · 由${title}使用")
                 }
                 item {
                     CardGroup {
                         PrivilegeCards.DADDY.forEach { card ->
+                            val displayCard = PrivilegeCards.withTitle(card, title)
                             item(
                                 leadingContent = { CardIcon(card.id, DaddyTint) },
                                 headlineContent = {
-                                    CardHeadline(name = card.name, count = setting.countOf(card.side, card.id), DaddyTint)
+                                    CardHeadline(name = displayCard.name, count = setting.countOf(card.side, card.id), DaddyTint)
                                 },
-                                supportingContent = { Text(card.desc) },
+                                supportingContent = { Text(displayCard.desc) },
                                 trailingContent = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         IconButton(onClick = { adjust(card.side, card, -1) }) {
-                                            Icon(Lucide.Minus, contentDescription = "减少一张${card.name}")
+                                            Icon(Lucide.Minus, contentDescription = "减少一张${displayCard.name}")
                                         }
                                         IconButton(onClick = { adjust(card.side, card, 1) }) {
-                                            Icon(Lucide.Plus, contentDescription = "增加一张${card.name}")
+                                            Icon(Lucide.Plus, contentDescription = "增加一张${displayCard.name}")
                                         }
                                     }
                                 }
@@ -204,19 +207,20 @@ fun SettingPrivilegeCardPage(vm: SettingVM = koinInject()) {
                 item {
                     CardGroup {
                         PrivilegeCards.BABY.forEach { card ->
+                            val displayCard = PrivilegeCards.withTitle(card, title)
                             item(
                                 leadingContent = { CardIcon(card.id, BabyTint) },
                                 headlineContent = {
-                                    CardHeadline(name = card.name, count = setting.countOf(card.side, card.id), BabyTint)
+                                    CardHeadline(name = displayCard.name, count = setting.countOf(card.side, card.id), BabyTint)
                                 },
-                                supportingContent = { Text(card.desc) },
+                                supportingContent = { Text(displayCard.desc) },
                                 trailingContent = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         IconButton(onClick = { adjust(card.side, card, -1) }) {
-                                            Icon(Lucide.Minus, contentDescription = "减少一张${card.name}")
+                                            Icon(Lucide.Minus, contentDescription = "减少一张${displayCard.name}")
                                         }
                                         IconButton(onClick = { adjust(card.side, card, 1) }) {
-                                            Icon(Lucide.Plus, contentDescription = "增加一张${card.name}")
+                                            Icon(Lucide.Plus, contentDescription = "增加一张${displayCard.name}")
                                         }
                                     }
                                 }

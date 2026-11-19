@@ -708,6 +708,9 @@ data class DisplaySetting(
     val thinkingChainTransparency: Float = 0f,
     // 自定义字体
     val customFontPath: String = "",
+    // 对TA的称呼 (夹带私货解耦): 输入框 placeholder "Message to $partnerTitle..." / 语音通话名字;
+    // 特权卡里的"爸爸"用 resolveTitle() 派生 (默认 Daddy 时显示"爸爸", 自定义后直接用该值)
+    val partnerTitle: String = "Daddy",
     // 输入框自定义背景
     val inputBackgroundPath: String = "",
     // 头像框（QQ挂件风格）

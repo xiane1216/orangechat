@@ -9,6 +9,8 @@ package me.rerere.rikkahub.ui.components.ui
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -164,6 +166,7 @@ interface ChainOfThoughtScope {
         label: (@Composable () -> Unit),
         extra: (@Composable () -> Unit)? = null,
         onClick: (() -> Unit)? = null,
+        onLongClick: (() -> Unit)? = null,
         collapsedAdaptiveWidth: Boolean = false,
         content: (@Composable () -> Unit)? = null,
     )
@@ -191,6 +194,7 @@ interface ChainOfThoughtScope {
         label: (@Composable () -> Unit),
         extra: (@Composable () -> Unit)? = null,
         onClick: (() -> Unit)? = null,
+        onLongClick: (() -> Unit)? = null,
         collapsedAdaptiveWidth: Boolean = false,
         contentVisible: Boolean = expanded,
         content: (@Composable () -> Unit)? = null,
@@ -206,6 +210,7 @@ private class ChainOfThoughtScopeImpl(
         label: @Composable (() -> Unit),
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
+        onLongClick: (() -> Unit)?,
         collapsedAdaptiveWidth: Boolean,
         content: @Composable (() -> Unit)?
     ) {
@@ -215,6 +220,7 @@ private class ChainOfThoughtScopeImpl(
             label = label,
             extra = extra,
             onClick = onClick,
+            onLongClick = onLongClick,
             collapsedAdaptiveWidth = collapsedAdaptiveWidth,
             expanded = expanded,
             onExpandedChange = { expanded = it },
@@ -231,6 +237,7 @@ private class ChainOfThoughtScopeImpl(
         label: @Composable (() -> Unit),
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
+        onLongClick: (() -> Unit)?,
         collapsedAdaptiveWidth: Boolean,
         contentVisible: Boolean,
         content: @Composable (() -> Unit)?
@@ -240,6 +247,7 @@ private class ChainOfThoughtScopeImpl(
             label = label,
             extra = extra,
             onClick = onClick,
+            onLongClick = onLongClick,
             collapsedAdaptiveWidth = collapsedAdaptiveWidth,
             expanded = expanded,
             onExpandedChange = onExpandedChange,
@@ -248,12 +256,14 @@ private class ChainOfThoughtScopeImpl(
         )
     }
 
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
     private fun ChainOfThoughtStepContent(
         icon: @Composable (() -> Unit)?,
         label: @Composable (() -> Unit),
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
+        onLongClick: (() -> Unit)?,
         collapsedAdaptiveWidth: Boolean,
         expanded: Boolean,
         onExpandedChange: (Boolean) -> Unit,
@@ -283,14 +293,15 @@ private class ChainOfThoughtScopeImpl(
                         }
                     )
                     .then(
-                        if (onClick != null) {
+                        if (onClick != null || hasContent || onLongClick != null) {
                             Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .clickable { onClick() }
-                        } else if (hasContent) {
-                            Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onExpandedChange(!expanded) }
+                                .combinedClickable(
+                                    onClick = {
+                                        if (onClick != null) onClick() else if (hasContent) onExpandedChange(!expanded)
+                                    },
+                                    onLongClick = onLongClick,
+                                )
                         } else {
                             Modifier
                         }

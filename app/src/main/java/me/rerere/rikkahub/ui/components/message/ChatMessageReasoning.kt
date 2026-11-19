@@ -213,6 +213,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     assistant: Assistant?,
     fadeHeight: Float = 64f,
     collapsedAdaptiveWidth: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val (state, loading) = rememberReasoningState(reasoning)
     // 思考链字体颜色: 自定义设置优先, null 时头部用主题灰, 玫瑰粉仅作为心形兜底色
@@ -247,6 +248,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             )
         },
         collapsedAdaptiveWidth = collapsedAdaptiveWidth,
+        onLongClick = onLongClick,
         contentVisible = state.expandState != ReasoningCardState.Collapsed,
         content = {
             ReasoningContent(
