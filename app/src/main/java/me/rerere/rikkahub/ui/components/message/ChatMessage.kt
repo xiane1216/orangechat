@@ -1027,7 +1027,7 @@ private fun MessagePartsBlock(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     showSideAvatar: Boolean = false,
-    onBubbleClick: (blockIndex: Int, segmentIndex: Int) -> Unit = {},
+    onBubbleClick: (blockIndex: Int, segmentIndex: Int) -> Unit = { _, _ -> },
     onBubbleLongClick: () -> Unit = {},
     // 点气泡快捷菜单浮层: showBubbleMenu 为 true 且内容块索引等于 menuBlockIndex 时,
     // 锚定渲染在该气泡块上方 (alignEnd 表示是否靠气泡右缘对齐, anchor 为气泡块的位置尺寸信息)
