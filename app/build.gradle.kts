@@ -25,8 +25,8 @@ android {
         applicationId = "com.rely.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 220
-        versionName = "2.6.5"
+        versionCode = 221
+        versionName = "2.6.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

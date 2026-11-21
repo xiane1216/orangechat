@@ -98,6 +98,7 @@ import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.utils.base64Decode
 import me.rerere.rikkahub.utils.navigateToChatPage
+import me.rerere.rikkahub.utils.splitIntoBubbleSegments
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
@@ -508,17 +509,26 @@ private fun ChatPageContent(
                     vm.updateConversation(conversation.copy(customSystemPrompt = newPrompt))
                     vm.saveConversationAsync()
                 },
-                onQuote = { message ->
-                    // 设置待引用消息, 发送时作为 Quote 部分附带
+                onQuote = { message, blockIndex, segmentIndex ->
+                    // 设置待引用消息, 发送时作为 Quote 部分附带。
+                    // 按气泡引用: blockIndex 是 message.parts 里的内容块下标,
+                    // segmentIndex 是分气泡模式下该块内被点的第几段; 只引用被点的那个气泡
                     val author = if (message.role == MessageRole.USER) {
                         setting.displaySetting.userNickname.ifBlank { "我" }
                     } else {
                         setting.getCurrentAssistant().name.ifBlank { "AI" }
                     }
-                    val text = message.parts
-                        .filterIsInstance<UIMessagePart.Text>()
-                        .joinToString("\n") { it.text }
-                        .trim()
+                    // 取被点内容块的原文; 分气泡时按同一规则切段后取对应段, 取不到则退回整块/整条
+                    val blockText = (message.parts.getOrNull(blockIndex) as? UIMessagePart.Text)
+                        ?.text?.trim().orEmpty()
+                    val text = if (blockText.isEmpty()) {
+                        message.parts
+                            .filterIsInstance<UIMessagePart.Text>()
+                            .joinToString("\n") { it.text }
+                            .trim()
+                    } else {
+                        blockText.splitIntoBubbleSegments().getOrNull(segmentIndex) ?: blockText
+                    }
                     if (text.isNotEmpty()) {
                         vm.pendingQuote = UIMessagePart.Quote(
                             quotedMessageId = message.id.toString(),

@@ -126,6 +126,9 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
 
+// 流式快照应用间隔 (ms): 约 12fps 的文本刷新率, 肉眼已足够流畅且大幅降低重组压力
+private const val STREAM_APPLY_INTERVAL_MS = 80L
+
 data class ChatError(
     val id: Uuid = Uuid.random(),
     val title: String? = null,
@@ -874,6 +877,9 @@ class ChatService(
         // session 需要在 runCatching 外声明，以便 .onSuccess 中也能访问 saveMutex
         val session = getOrCreateSession(conversationId)
 
+        // 流式节流状态: 上次应用快照的时间戳 (见下方 collect 内注释)
+        var lastStreamApplyAt = 0L
+
         runCatching {
 
             // reset suggestions
@@ -990,13 +996,20 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
             }.collect { chunk ->
                 when (chunk) {
                     is GenerationChunk.Messages -> {
-                        val updatedConversation = getConversationFlow(conversationId).value
-                            .updateCurrentMessages(chunk.messages)
-                        updateConversation(conversationId, updatedConversation)
+                        // 流式节流: SSE 碎片频率远高于 UI 刷新需要 (一秒几十个),
+                        // 每帧都全量重组消息列表会砸掉 UI 线程, 表现为"卡一下吐一大段"。
+                        // chunk.messages 是累计快照, 丢弃中间帧安全; 最终帧由 onCompletion 兜底
+                        val now = System.currentTimeMillis()
+                        if (now - lastStreamApplyAt >= STREAM_APPLY_INTERVAL_MS) {
+                            lastStreamApplyAt = now
+                            val updatedConversation = getConversationFlow(conversationId).value
+                                .updateCurrentMessages(chunk.messages)
+                            updateConversation(conversationId, updatedConversation)
 
-                        // 如果应用不在前台，发送 Live Update 通知
-                        if (!isForeground.value && settings.displaySetting.enableNotificationOnMessageGeneration && settings.displaySetting.enableLiveUpdateNotification) {
-                            sendLiveUpdateNotification(conversationId, chunk.messages, senderName)
+                            // 如果应用不在前台，发送 Live Update 通知
+                            if (!isForeground.value && settings.displaySetting.enableNotificationOnMessageGeneration && settings.displaySetting.enableLiveUpdateNotification) {
+                                sendLiveUpdateNotification(conversationId, chunk.messages, senderName)
+                            }
                         }
                     }
                 }

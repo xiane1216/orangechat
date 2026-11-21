@@ -165,7 +165,7 @@ fun ChatList(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
-    onQuote: ((UIMessage) -> Unit)? = null,
+    onQuote: ((message: UIMessage, blockIndex: Int, segmentIndex: Int) -> Unit)? = null,
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -241,7 +241,7 @@ private fun ChatListNormal(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
-    onQuote: ((UIMessage) -> Unit)? = null,
+    onQuote: ((message: UIMessage, blockIndex: Int, segmentIndex: Int) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val loadingState by rememberUpdatedState(loading)

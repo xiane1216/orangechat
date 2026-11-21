@@ -97,6 +97,7 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import androidx.core.net.toUri
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -185,7 +186,7 @@ fun ChatMessage(
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
-    onQuote: ((UIMessage) -> Unit)? = null,
+    onQuote: ((message: UIMessage, blockIndex: Int, segmentIndex: Int) -> Unit)? = null,
 ) {
     val message = node.messages[node.selectIndex]
     val settings = LocalDisplaySettings.current
@@ -211,9 +212,11 @@ fun ChatMessage(
     var showSelectCopySheet by remember { mutableStateOf(false) }
     // 用户消息"重新生成"确认弹窗 (会删除该消息之后的分支)
     var showUserRegenConfirm by remember { mutableStateOf(false) }
-    // 点气泡快捷菜单: showBubbleMenu 控制显隐, bubbleMenuBlockIndex 记录锚定在哪个内容块 (气泡) 上
+    // 点气泡快捷菜单: showBubbleMenu 控制显隐, bubbleMenuBlockIndex 记录锚定在哪个内容块 (气泡) 上,
+    // bubbleMenuSegmentIndex 记录分气泡模式下点的是第几段 (按气泡引用用)
     var showBubbleMenu by remember { mutableStateOf(false) }
     var bubbleMenuBlockIndex by remember { mutableIntStateOf(-1) }
+    var bubbleMenuSegmentIndex by remember { mutableIntStateOf(0) }
     var showTranslateDialog by remember { mutableStateOf(false) }
     val navController = LocalNavController.current
     val context = LocalContext.current
@@ -246,8 +249,9 @@ fun ChatMessage(
                     onToolApproval = onToolApproval,
                     onToolAnswer = onToolAnswer,
                     showSideAvatar = !isUser,
-                    onBubbleClick = { blockIndex ->
+                    onBubbleClick = { blockIndex, segmentIndex ->
                         bubbleMenuBlockIndex = blockIndex
+                        bubbleMenuSegmentIndex = segmentIndex
                         showBubbleMenu = true
                     },
                     bubbleMenu = { alignEnd, menuAnchor ->
@@ -263,7 +267,8 @@ fun ChatMessage(
                                 enabled = onQuote != null,
                                 onClick = {
                                     showBubbleMenu = false
-                                    onQuote?.invoke(message)
+                                    // 按气泡引用: 传内容块索引 + 分气泡段索引, 引用被点的那个气泡而非整轮回复
+                                    onQuote?.invoke(message, bubbleMenuBlockIndex, bubbleMenuSegmentIndex)
                                 },
                             )
                             CompactBubbleMenuItem(
@@ -553,7 +558,8 @@ private fun MessageContentBlock(
     bubbleAlpha: Float,
     maxBubbleWidth: Dp,
     showStreamingCursor: Boolean,
-    onBubbleClick: () -> Unit,
+    // 分气泡模式下传被点气泡的段索引, 单气泡传 0; 上层按 (内容块, 段) 定位引用文本
+    onBubbleClick: (segmentIndex: Int) -> Unit,
     onBubbleLongClick: () -> Unit,
     onClickCitation: (String) -> Unit,
     showBubbleMenu: Boolean = false,
@@ -620,7 +626,7 @@ private fun MessageContentBlock(
                                             overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
                                             bubbleAlpha = bubbleAlpha,
                                             modifier = bubbleModifier,
-                                            onClick = onBubbleClick,
+                                            onClick = { onBubbleClick(segIndex) },
                                             onLongClick = onBubbleLongClick,
                                         ) {
                                             if (showQuote && segIndex == 0) {
@@ -648,7 +654,7 @@ private fun MessageContentBlock(
                                 overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
                                 bubbleAlpha = bubbleAlpha,
                                 modifier = bubbleModifier,
-                                onClick = onBubbleClick,
+                                onClick = { onBubbleClick(0) },
                                 onLongClick = onBubbleLongClick,
                             ) {
                                 if (showQuote) {
@@ -685,30 +691,30 @@ private fun MessageContentBlock(
                                             overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
                                             bubbleAlpha = bubbleAlpha,
                                             modifier = bubbleModifier,
-                                            onClick = onBubbleClick,
+                                            onClick = { onBubbleClick(segIndex) },
                                             onLongClick = onBubbleLongClick,
                                         ) {
                                             if (showQuote && segIndex == 0) {
                                                 quotePart?.let { MessageQuoteBlock(quote = it) }
                                             }
+                                            // 流式光标: 内联跟在最后一个字符后面 (而非独立块掉到下一行)
                                             MarkdownBlock(
                                                 content = segment.replaceRegexes(
                                                     assistant = assistant,
                                                     scope = AssistantAffectScope.ASSISTANT,
                                                     visual = true,
+                                                ) + rememberStreamingCursorSuffix(
+                                                    enabled = showCursor && segIndex == bubbleSegments.lastIndex
                                                 ),
                                                 onClickCitation = onClickCitation,
                                             )
-                                            if (showCursor && segIndex == bubbleSegments.lastIndex) {
-                                                StreamingCursor()
-                                            }
                                         }
                                     } else {
                                         Box(
                                             modifier = bubbleModifier
                                                 .animateContentSize()
                                                 .combinedClickable(
-                                                    onClick = onBubbleClick,
+                                                    onClick = { onBubbleClick(segIndex) },
                                                     onLongClick = onBubbleLongClick,
                                                 )
                                         ) {
@@ -720,12 +726,11 @@ private fun MessageContentBlock(
                                                     assistant = assistant,
                                                     scope = AssistantAffectScope.ASSISTANT,
                                                     visual = true,
+                                                ) + rememberStreamingCursorSuffix(
+                                                    enabled = showCursor && segIndex == bubbleSegments.lastIndex
                                                 ),
                                                 onClickCitation = onClickCitation,
                                             )
-                                            if (showCursor && segIndex == bubbleSegments.lastIndex) {
-                                                StreamingCursor()
-                                            }
                                         }
                                     }
                                 }
@@ -740,30 +745,28 @@ private fun MessageContentBlock(
                                 overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
                                 bubbleAlpha = bubbleAlpha,
                                 modifier = bubbleModifier,
-                                onClick = onBubbleClick,
+                                onClick = { onBubbleClick(0) },
                                 onLongClick = onBubbleLongClick,
                             ) {
                                 if (showQuote) {
                                     quotePart?.let { MessageQuoteBlock(quote = it) }
                                 }
+                                // 流式光标: 内联跟在最后一个字符后面 (而非独立块掉到下一行)
                                 MarkdownBlock(
                                     content = displayText.replaceRegexes(
                                         assistant = assistant,
                                         scope = AssistantAffectScope.ASSISTANT,
                                         visual = true,
-                                    ),
+                                    ) + rememberStreamingCursorSuffix(enabled = showCursor),
                                     onClickCitation = onClickCitation,
                                 )
-                                if (showCursor) {
-                                    StreamingCursor()
-                                }
                             }
                         } else {
                             Box(
                                 modifier = bubbleModifier
                                     .animateContentSize()
                                     .combinedClickable(
-                                        onClick = onBubbleClick,
+                                        onClick = { onBubbleClick(0) },
                                         onLongClick = onBubbleLongClick,
                                     )
                             ) {
@@ -775,12 +778,9 @@ private fun MessageContentBlock(
                                         assistant = assistant,
                                         scope = AssistantAffectScope.ASSISTANT,
                                         visual = true,
-                                    ),
+                                    ) + rememberStreamingCursorSuffix(enabled = showCursor),
                                     onClickCitation = onClickCitation,
                                 )
-                                if (showCursor) {
-                                    StreamingCursor()
-                                }
                             }
                         }
                     }
@@ -959,27 +959,19 @@ private fun MessageQuoteBlock(
     }
 }
 
-// 流式输出光标: 粉色竖条闪烁
+// 流式光标: 内联字符后缀, 拼在正文最后, 天然跟在最后一个字后面 (旧版独立方块会掉到下一行)。
+// 每 500ms 翻转一次显隐模拟闪烁; 空格占位保持末尾行高稳定, 不引起布局跳动
 @Composable
-private fun StreamingCursor(modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "streamingCursor")
-    val alpha by transition.animateFloat(
-        initialValue = 0.15f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(500),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "streamingCursorAlpha",
-    )
-    val cursorHeight = with(LocalDensity.current) { 14.sp.toDp() }
-    Box(
-        modifier = modifier
-            .padding(top = 2.dp)
-            .width(2.dp)
-            .height(cursorHeight)
-            .background(Color(0xFFD3A9A3).copy(alpha = alpha)),
-    )
+private fun rememberStreamingCursorSuffix(enabled: Boolean): String {
+    if (!enabled) return ""
+    var visible by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(500)
+            visible = !visible
+        }
+    }
+    return if (visible) "▌" else " "
 }
 
 // 等待动画: 三个 6dp 粉点上下跳动 (周期 1.1s, 相位差 0.15s)。
@@ -1035,7 +1027,7 @@ private fun MessagePartsBlock(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     showSideAvatar: Boolean = false,
-    onBubbleClick: (blockIndex: Int) -> Unit = {},
+    onBubbleClick: (blockIndex: Int, segmentIndex: Int) -> Unit = {},
     onBubbleLongClick: () -> Unit = {},
     // 点气泡快捷菜单浮层: showBubbleMenu 为 true 且内容块索引等于 menuBlockIndex 时,
     // 锚定渲染在该气泡块上方 (alignEnd 表示是否靠气泡右缘对齐, anchor 为气泡块的位置尺寸信息)
@@ -1232,7 +1224,7 @@ private fun MessagePartsBlock(
                             bubbleAlpha = bubbleAlpha,
                             maxBubbleWidth = maxBubbleWidth,
                             showStreamingCursor = showStreamingCursor,
-                            onBubbleClick = { onBubbleClick(blockIndex) },
+                            onBubbleClick = { segmentIdx -> onBubbleClick(blockIndex, segmentIdx) },
                             onBubbleLongClick = onBubbleLongClick,
                             onClickCitation = handleClickCitation,
                             showBubbleMenu = showBubbleMenu && blockIndex == menuBlockIndex,
