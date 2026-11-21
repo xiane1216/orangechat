@@ -879,6 +879,8 @@ class ChatService(
 
         // 流式节流状态: 上次应用快照的时间戳 (见下方 collect 内注释)
         var lastStreamApplyAt = 0L
+        // 最近一帧的累计快照: 节流可能跳过最后一帧, 完成时用它补刷, 防止结尾截断
+        var latestStreamMessages: List<UIMessage>? = null
 
         runCatching {
 
@@ -980,6 +982,12 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
                 // 取消 Live Update 通知
                 cancelLiveUpdateNotification(conversationId)
 
+                // 节流可能吞掉了最后一帧, 完成时把最终完整文本强制刷上去, 否则结尾截断
+                latestStreamMessages?.let { finalMessages ->
+                    val flushed = getConversationFlow(conversationId).value.updateCurrentMessages(finalMessages)
+                    updateConversation(conversationId, flushed)
+                }
+
                 // 可能被取消了，或者意外结束，兜底更新
                 val updatedConversation = getConversationFlow(conversationId).value.copy(
                     messageNodes = getConversationFlow(conversationId).value.messageNodes.map { node ->
@@ -999,6 +1007,7 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
                         // 流式节流: SSE 碎片频率远高于 UI 刷新需要 (一秒几十个),
                         // 每帧都全量重组消息列表会砸掉 UI 线程, 表现为"卡一下吐一大段"。
                         // chunk.messages 是累计快照, 丢弃中间帧安全; 最终帧由 onCompletion 兜底
+                        latestStreamMessages = chunk.messages
                         val now = System.currentTimeMillis()
                         if (now - lastStreamApplyAt >= STREAM_APPLY_INTERVAL_MS) {
                             lastStreamApplyAt = now

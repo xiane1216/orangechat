@@ -582,8 +582,6 @@ private fun MessageContentBlock(
                 parts.indexOfFirst { it is UIMessagePart.Text }
             }
             val showQuote = quotePart != null && block.index == firstTextIndex
-            // 流式光标: 仅最后一条 AI 消息的最后一个内容块显示
-            val showCursor = showStreamingCursor && isLastBlock && role == MessageRole.ASSISTANT
             val bubbleModifier = Modifier.widthIn(max = maxBubbleWidth)
 
             // 气泡块容器: 快捷菜单 Popup 锚定在这个 Box 上 (相对气泡定位),
@@ -703,8 +701,6 @@ private fun MessageContentBlock(
                                                     assistant = assistant,
                                                     scope = AssistantAffectScope.ASSISTANT,
                                                     visual = true,
-                                                ) + rememberStreamingCursorSuffix(
-                                                    enabled = showCursor && segIndex == bubbleSegments.lastIndex
                                                 ),
                                                 onClickCitation = onClickCitation,
                                             )
@@ -726,8 +722,6 @@ private fun MessageContentBlock(
                                                     assistant = assistant,
                                                     scope = AssistantAffectScope.ASSISTANT,
                                                     visual = true,
-                                                ) + rememberStreamingCursorSuffix(
-                                                    enabled = showCursor && segIndex == bubbleSegments.lastIndex
                                                 ),
                                                 onClickCitation = onClickCitation,
                                             )
@@ -757,7 +751,7 @@ private fun MessageContentBlock(
                                         assistant = assistant,
                                         scope = AssistantAffectScope.ASSISTANT,
                                         visual = true,
-                                    ) + rememberStreamingCursorSuffix(enabled = showCursor),
+                                    ),
                                     onClickCitation = onClickCitation,
                                 )
                             }
@@ -778,7 +772,7 @@ private fun MessageContentBlock(
                                         assistant = assistant,
                                         scope = AssistantAffectScope.ASSISTANT,
                                         visual = true,
-                                    ) + rememberStreamingCursorSuffix(enabled = showCursor),
+                                    ),
                                     onClickCitation = onClickCitation,
                                 )
                             }
@@ -959,20 +953,6 @@ private fun MessageQuoteBlock(
     }
 }
 
-// 流式光标: 内联字符后缀, 拼在正文最后, 天然跟在最后一个字后面 (旧版独立方块会掉到下一行)。
-// 每 500ms 翻转一次显隐模拟闪烁; 空格占位保持末尾行高稳定, 不引起布局跳动
-@Composable
-private fun rememberStreamingCursorSuffix(enabled: Boolean): String {
-    if (!enabled) return ""
-    var visible by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(500)
-            visible = !visible
-        }
-    }
-    return if (visible) "▌" else " "
-}
 
 // 等待动画: 三个 6dp 粉点上下跳动 (周期 1.1s, 相位差 0.15s)。
 // ChatList 的独立等待项与消息内等待态共用, 保证两处样式完全一致
