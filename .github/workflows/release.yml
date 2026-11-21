@@ -60,7 +60,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ steps.version.outputs.version }}" \
-            --title "Release ${{ steps.version.outputs.version }}" \
-            --generate-notes \
-            app/build/outputs/apk/release/*.apk
+          VERSION="${{ steps.version.outputs.version }}"
+          if gh release view "$VERSION" > /dev/null 2>&1; then
+            echo "Release $VERSION already exists, uploading assets to existing release"
+            gh release upload "$VERSION" --clobber app/build/outputs/apk/release/*.apk
+          else
+            gh release create "$VERSION" \
+              --title "Release $VERSION" \
+              --generate-notes \
+              app/build/outputs/apk/release/*.apk
+          fi
