@@ -1787,6 +1787,10 @@ internal fun VoiceMessageBubble(
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     // 气泡外壳与普通消息气泡完全同款: 用户/助手气泡色 + 毛玻璃 + 背景图 + 圆角 + 透明度全跟随设置
     val displaySettings = LocalDisplaySettings.current
+    // 用户气泡内内容色: 跟随显示设置里的用户字体颜色 (未设置时用主题默认)
+    val userContentColor = if (isUser) displaySettings.userMessageFontColor?.let { it.toComposeColor() }
+        ?: MaterialTheme.colorScheme.onPrimaryContainer
+    else MaterialTheme.colorScheme.primary
  
     val durationSec = (voiceMessage.duration / 1000).coerceAtLeast(1)
  
@@ -1850,8 +1854,7 @@ internal fun VoiceMessageBubble(
                 // 细线播放/暂停图标 (比 HugeIcons 实心圆更精致)
                 VoicePlayIcon(
                     isPlaying = isPlaying,
-                    color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer
-                    else MaterialTheme.colorScheme.primary,
+                    color = userContentColor,
                     modifier = Modifier.size(24.dp)
                 )
                 // Waveform bars
@@ -1859,8 +1862,7 @@ internal fun VoiceMessageBubble(
                     val rnd = java.util.Random(voiceMessage.url.hashCode().toLong())
                     List(24) { 0.2f + rnd.nextFloat() * 0.8f }
                 }
-                val waveformColor = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
-                else MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.5f)
+                val waveformColor = userContentColor.copy(alpha = 0.5f)
                 Canvas(modifier = Modifier.width(60.dp).height(24.dp)) {
                     val barCount = waveformBars.size
                     val barWidth = 2.5f
@@ -1880,8 +1882,7 @@ internal fun VoiceMessageBubble(
                 Text(
                     text = "${durationSec}″",
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer
-                    else MaterialTheme.colorScheme.onSecondaryContainer,
+                    color = userContentColor,
                 )
         }
     }
