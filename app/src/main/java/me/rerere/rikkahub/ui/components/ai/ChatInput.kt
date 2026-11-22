@@ -782,7 +782,9 @@ fun ChatInput(
                                         .background(
                                             when {
                                                 modelDownloadingText != null -> MaterialTheme.colorScheme.surfaceContainerHighest
-                                                pressing -> MaterialTheme.colorScheme.primaryContainer
+                                                // 录音中底色跟随显示设置里的用户气泡颜色 (与聊天气泡同一取值逻辑)
+                                                pressing -> LocalDisplaySettings.current.userBubbleColor?.let { it.toComposeColor() }
+                                                    ?: MaterialTheme.colorScheme.secondaryContainer
                                                 else -> MaterialTheme.colorScheme.surfaceContainerHigh
                                             }
                                         )
