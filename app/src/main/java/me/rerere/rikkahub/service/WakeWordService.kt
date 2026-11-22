@@ -353,9 +353,9 @@ class WakeWordService : Service(), KoinComponent {
                 appUsageService.getForegroundApp().getOrNull()?.appName
             }.getOrNull()
             val text = if (!fgName.isNullOrBlank()) {
-                "宝宝当前的前台是在刷「$fgName」，宝宝叫了你一下。"
+                "[语音唤醒] 宝宝当前的前台是在刷「$fgName」，宝宝叫了你一下。"
             } else {
-                "宝宝叫了你一下。"
+                "[语音唤醒] 宝宝叫了你一下。"
             }
             chatService.sendMessage(conversationId, listOf(UIMessagePart.Text(text)))
         } catch (e: Exception) {
