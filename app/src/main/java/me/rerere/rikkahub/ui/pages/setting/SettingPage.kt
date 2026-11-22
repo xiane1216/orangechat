@@ -50,6 +50,7 @@ import me.rerere.hugeicons.stroke.AiMagic
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.CloudServer
 import me.rerere.hugeicons.stroke.Book01
+import me.rerere.hugeicons.stroke.Mic01
 import me.rerere.hugeicons.stroke.Ticket01
 import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Bookshelf01

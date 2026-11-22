@@ -103,9 +103,9 @@ object WakeWordEngine {
             // 韵母候选: 原样优先; 若为无声调(轻声字), 依次尝试 4声/1声/2声/3声变体
             val candidates = mutableListOf(final)
             if (final.none { it in ALL_TONED_CHARS }) {
-                // 标调位置: a > o > e > 末尾 i/u
+                // 标调位置: a > o > e > 末尾 i/u (final 已保证非空)
                 val markIdx = final.indexOfFirst { it in "aoei" }.takeIf { it >= 0 }
-                    ?: final.length.minus(1).takeIf { final.lastOrNull() in "iu" }
+                    ?: final.length.minus(1).takeIf { final.last() in "iu" }
                 val toneVariants = markIdx?.let { TONE_MARKS[final[it]] }
                 if (toneVariants != null) {
                     for (tone in intArrayOf(3, 0, 1, 2)) {
