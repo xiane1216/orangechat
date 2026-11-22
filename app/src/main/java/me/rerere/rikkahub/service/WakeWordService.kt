@@ -20,6 +20,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.k2fsa.sherpa.onnx.KeywordSpotter
@@ -198,6 +199,10 @@ class WakeWordService : Service(), KoinComponent {
                 spotter = WakeWordEngine.create(applicationContext, setting.wakeWord)
                 stream = spotter.createStream()
                 Log.i(TAG, "唤醒引擎就绪: ${setting.wakeWord}")
+                // 昵称可能在运行中被改: 引擎重建后同步刷新常驻通知文案
+                runCatching {
+                    NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, buildNotification(setting))
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "唤醒引擎初始化失败: ${e.message}", e)
                 stopSelf()
@@ -339,9 +344,13 @@ class WakeWordService : Service(), KoinComponent {
             Log.e(TAG, "跳转聊天页失败", e)
         }
 
-        // 以用户身份插入昵称消息 -> 自动生成回复
+        // 以用户身份插入唤醒消息 -> 自动生成回复
+        // 带上 [语音唤醒] 前缀, AI 能明确知道是喊出来的而不是打字
         try {
-            chatService.sendMessage(conversationId, listOf(UIMessagePart.Text(currentSetting.wakeWord)))
+            chatService.sendMessage(
+                conversationId,
+                listOf(UIMessagePart.Text("[语音唤醒] ${currentSetting.wakeWord}"))
+            )
         } catch (e: Exception) {
             Log.e(TAG, "插入唤醒消息失败", e)
         }
