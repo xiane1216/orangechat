@@ -287,11 +287,12 @@ class ProactiveMessageService : KoinComponent {
             if (usageResult.isSuccess) {
                 val usageStats = usageResult.getOrThrow()
                 if (usageStats.isNotEmpty()) {
+                    val timeSdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
                     sb.appendLine("今日应用使用:")
                     usageStats.take(5).forEach { stat ->
                         val minutes = stat.totalTimeInForeground / 60000
                         if (minutes > 0) {
-                            sb.appendLine("  - ${stat.appName}: ${minutes}分钟")
+                            sb.appendLine("  - ${stat.appName}: ${minutes}分钟，最后使用 ${timeSdf.format(java.util.Date(stat.lastTimeUsed))}")
                         }
                     }
                 }
@@ -300,15 +301,30 @@ class ProactiveMessageService : KoinComponent {
             Log.w(TAG, "Failed to get app usage context", e)
         }
 
+        // 最近一次亮屏使用手机的全局时刻(含桌面), 息屏后不再更新.
+        // 让 AI 判断用户是否在休息/忙碌, 避免深夜还以为用户醒着
+        try {
+            val appUsageService = AppUsageService(context)
+            val lastActiveResult = appUsageService.getLastUserActivityTime()
+            if (lastActiveResult.isSuccess) {
+                val lastActive = lastActiveResult.getOrThrow()
+                val timeSdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                val silentMinutes = (currentTime - lastActive) / 60000
+                val silentText = if (silentMinutes < 1) "刚刚还在用" else "已静默 ${silentMinutes}分钟"
+                sb.appendLine("最近亮屏: ${timeSdf.format(java.util.Date(lastActive))}（$silentText）")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get last screen active time", e)
+        }
+
         // Foreground app
         try {
             val appUsageService = AppUsageService(context)
             val foregroundResult = appUsageService.getForegroundApp()
             if (foregroundResult.isSuccess) {
                 val foregroundApp = foregroundResult.getOrThrow()
-                if (foregroundApp.isNotBlank()) {
-                    sb.appendLine("当前前台应用: $foregroundApp")
-                }
+                val sinceMinutes = (currentTime - foregroundApp.sinceTimestamp) / 60000
+                sb.appendLine("当前前台应用: ${foregroundApp.appName}（${foregroundApp.packageName}，${sinceMinutes}分钟前进入）")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get foreground app", e)

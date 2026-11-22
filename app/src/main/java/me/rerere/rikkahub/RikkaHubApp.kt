@@ -43,6 +43,7 @@ import me.rerere.rikkahub.data.service.ProactiveMessageService
 import me.rerere.rikkahub.data.service.SupabaseSyncService
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.KeepAliveService
+import me.rerere.rikkahub.service.WakeWordService
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.DatabaseUtil
@@ -61,6 +62,7 @@ const val POMODORO_NOTIFICATION_CHANNEL_ID = "pomodoro_timer"
 const val MUSIC_PLAYER_NOTIFICATION_CHANNEL_ID = "music_player"
 const val DEVICE_EVENT_NOTIFICATION_CHANNEL_ID = "device_event_tracking"
 const val VOICE_CALL_NOTIFICATION_CHANNEL_ID = "voice_call"
+const val WAKE_WORD_NOTIFICATION_CHANNEL_ID = "wake_word"
 const val ANNOUNCEMENT_NOTIFICATION_CHANNEL_ID = "announcement"
 const val EXTERNAL_MEMORY_NOTIFICATION_CHANNEL_ID = "external_memory_sync"
 
@@ -134,6 +136,9 @@ class RikkaHubApp : Application() {
 
         // Start keep-alive FGS if enabled (开机/覆盖安装由 Receiver 拉起, 这里覆盖其余进程启动场景)
         startKeepAliveIfEnabled()
+
+        // Start wake word listener FGS if enabled (开机由 KeepAliveRestartReceiver 拉起, 这里覆盖其余启动场景)
+        startWakeWordIfEnabled()
 
         // Reschedule Supabase sync alarm if enabled
         rescheduleSupabaseSyncIfEnabled()
@@ -242,6 +247,20 @@ class RikkaHubApp : Application() {
                 }
             }.onFailure {
                 Log.e(TAG, "startKeepAliveIfEnabled failed", it)
+            }
+        }
+    }
+
+    private fun startWakeWordIfEnabled() {
+        get<AppScope>().launch {
+            runCatching {
+                val setting = get<SettingsStore>().settingsFlowRaw.first().wakeWordSetting
+                if (setting.enabled) {
+                    WakeWordService.start(this@RikkaHubApp)
+                    Log.i(TAG, "Started wake word service on app start")
+                }
+            }.onFailure {
+                Log.e(TAG, "startWakeWordIfEnabled failed", it)
             }
         }
     }
@@ -396,6 +415,14 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(voiceCallChannel)
+
+        val wakeWordChannel = NotificationChannelCompat
+            .Builder(WAKE_WORD_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName("语音唤醒")
+            .setVibrationEnabled(false)
+            .setShowBadge(false)
+            .build()
+        notificationManager.createNotificationChannel(wakeWordChannel)
 
         val announcementChannel = NotificationChannelCompat
             .Builder(ANNOUNCEMENT_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_HIGH)

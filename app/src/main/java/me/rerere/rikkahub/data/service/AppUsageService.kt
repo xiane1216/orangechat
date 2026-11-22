@@ -31,6 +31,15 @@ data class AppTrajectoryEvent(
     val timestamp: Long
 )
 
+/**
+ * 当前前台应用信息: 包名 + 应用名 + 最近一次进入前台的时间
+ */
+data class ForegroundAppInfo(
+    val packageName: String,
+    val appName: String,
+    val sinceTimestamp: Long
+)
+
 class AppUsageService(private val context: Context) {
     companion object {
         // 计算前台时长时向前回看的窗口(12h), 用于还原"今日零点前就已在前台"的 App;
@@ -45,6 +54,21 @@ class AppUsageService(private val context: Context) {
 
     private val packageManager by lazy {
         context.packageManager
+    }
+
+    // 包名 -> 应用名 缓存, 避免心跳/同步场景频繁查 PackageManager
+    private val appNameCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * 解析包名对应的应用名; 找不到(已卸载/系统包)时原样返回包名
+     */
+    fun getAppName(packageName: String): String = appNameCache.getOrPut(packageName) {
+        try {
+            val appInfo = packageManager.getApplicationInfo(packageName, 0)
+            packageManager.getApplicationLabel(appInfo).toString()
+        } catch (e: PackageManager.NameNotFoundException) {
+            packageName
+        }
     }
 
     /**
@@ -207,7 +231,7 @@ class AppUsageService(private val context: Context) {
         }
     }
 
-    fun getForegroundApp(): Result<String> = runCatching {
+    fun getForegroundApp(): Result<ForegroundAppInfo> = runCatching {
         // queryUsageStats 只在应用退到后台时刷新 lastTimeUsed, 正在使用的前台应用记录是旧的,
         // 会返回"上一个使用的应用". 改用 queryEvents 找最近一次进入前台的事件.
         val endTime = System.currentTimeMillis()
@@ -216,16 +240,51 @@ class AppUsageService(private val context: Context) {
         val usageEvents = usageStatsManager.queryEvents(startTime, endTime)
         val event = UsageEvents.Event()
         var foregroundPackage: String? = null
+        var sinceTimestamp = 0L
 
         // 事件按时间顺序返回, 后出现的覆盖先出现的, 遍历完即为最近一次进入前台的应用
         while (usageEvents.hasNextEvent()) {
             usageEvents.getNextEvent(event)
             if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
                 foregroundPackage = event.packageName
+                sinceTimestamp = event.timeStamp
             }
         }
 
-        foregroundPackage ?: throw IllegalStateException("无法获取前台应用")
+        val pkg = foregroundPackage ?: throw IllegalStateException("无法获取前台应用")
+        ForegroundAppInfo(
+            packageName = pkg,
+            appName = getAppName(pkg),
+            sinceTimestamp = sinceTimestamp
+        )
+    }
+
+    /**
+     * 获取用户最近一次操作手机的时间: 最近24小时内最后一个"进前台/退后台"事件的时刻(含桌面).
+     * 息屏期间不会产生这类事件, 因此该值即"最近亮屏使用手机"的时刻,
+     * 与系统设置里屏幕使用时间页的"最近使用"语义一致.
+     * 注意: 不统计息屏事件(SCREEN_NON_INTERACTIVE), 否则息屏瞬间会被当成"还在用手机".
+     */
+    fun getLastUserActivityTime(): Result<Long> = runCatching {
+        val endTime = System.currentTimeMillis()
+        val startTime = endTime - 24 * 60 * 60 * 1000L
+
+        val usageEvents = usageStatsManager.queryEvents(startTime, endTime)
+        val event = UsageEvents.Event()
+        var lastActivity = 0L
+
+        while (usageEvents.hasNextEvent()) {
+            usageEvents.getNextEvent(event)
+            when (event.eventType) {
+                UsageEvents.Event.MOVE_TO_FOREGROUND,
+                UsageEvents.Event.MOVE_TO_BACKGROUND -> if (event.timeStamp > lastActivity) {
+                    lastActivity = event.timeStamp
+                }
+            }
+        }
+
+        if (lastActivity <= 0L) throw IllegalStateException("无法获取最近使用时间")
+        lastActivity
     }
 
     fun formatUsageTime(millis: Long): String {

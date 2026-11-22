@@ -704,6 +704,10 @@ entry<Screen.Extensions> {
                                 SettingHeartbeatPage()
                             }
 
+                            entry<Screen.SettingWakeWord> {
+                                me.rerere.rikkahub.ui.pages.setting.SettingWakeWordPage()
+                            }
+
                             entry<Screen.SettingAnniversary> {
                                 SettingAnniversaryPage()
                             }
@@ -1091,6 +1095,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingHeartbeat : Screen
+
+    @Serializable
+    data object SettingWakeWord : Screen
 
     @Serializable
     data object SettingAnniversary : Screen

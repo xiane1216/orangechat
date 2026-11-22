@@ -39,6 +39,8 @@ class KeepAliveRestartReceiver : BroadcastReceiver() {
             KeepAliveService.ACTION_KEEP_ALIVE_WATCHDOG -> {
                 Log.d(TAG, "收到拉起事件: ${intent.action}")
                 KeepAliveService.start(context)
+                // 语音唤醒服务同步拉起 (是否运行由 WakeWordService.startIfEnabled 自决: 读开关+麦克风权限)
+                WakeWordService.startIfEnabled(context)
             }
         }
     }

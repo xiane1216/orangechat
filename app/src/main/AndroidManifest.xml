@@ -393,6 +393,12 @@
       android:exported="false"
       android:foregroundServiceType="microphone" />
 
+    <!-- Wake Word (语音唤醒) Background Service: 离线监听唤醒词 -->
+    <service
+      android:name=".service.WakeWordService"
+      android:exported="false"
+      android:foregroundServiceType="microphone" />
+
     <!-- KeepAlive 拉起接收器: 开机 / 覆盖安装后 / 看门狗闹钟重拉前台保活服务 -->
     <receiver
       android:name=".service.KeepAliveRestartReceiver"

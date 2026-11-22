@@ -169,6 +169,7 @@ class SettingsStore(
 
         // 心跳机制设置
         val HEARTBEAT_SETTING = stringPreferencesKey("heartbeat_setting")
+        val WAKE_WORD_SETTING = stringPreferencesKey("wake_word_setting")
 
         // 小乖特权卡
         val PRIVILEGE_CARD_SETTING = stringPreferencesKey("privilege_card_setting")
@@ -303,6 +304,9 @@ class SettingsStore(
                 heartbeatSetting = preferences[HEARTBEAT_SETTING]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: HeartbeatSetting(),
+                wakeWordSetting = preferences[WAKE_WORD_SETTING]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: WakeWordSetting(),
                 privilegeCardSetting = preferences[PRIVILEGE_CARD_SETTING]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: PrivilegeCardSetting(),
@@ -496,6 +500,7 @@ class SettingsStore(
             preferences[SYSTEM_TOOLS_SETTING] = JsonInstant.encodeToString(settings.systemToolsSetting)
             preferences[PROACTIVE_MESSAGE_SETTING] = JsonInstant.encodeToString(settings.proactiveMessageSetting)
             preferences[HEARTBEAT_SETTING] = JsonInstant.encodeToString(settings.heartbeatSetting)
+            preferences[WAKE_WORD_SETTING] = JsonInstant.encodeToString(settings.wakeWordSetting)
             preferences[PRIVILEGE_CARD_SETTING] = JsonInstant.encodeToString(settings.privilegeCardSetting)
             preferences[WECHAT_BOT_SETTING] = JsonInstant.encodeToString(settings.wechatBotSetting)
             preferences[QQ_BOT_SETTING] = JsonInstant.encodeToString(settings.qqBotSetting)
@@ -638,6 +643,7 @@ data class Settings(
     val systemToolsSetting: SystemToolsSetting = SystemToolsSetting(),
     val proactiveMessageSetting: ProactiveMessageSetting = ProactiveMessageSetting(),
     val heartbeatSetting: HeartbeatSetting = HeartbeatSetting(),
+    val wakeWordSetting: WakeWordSetting = WakeWordSetting(),
     val privilegeCardSetting: PrivilegeCardSetting = PrivilegeCardSetting(),
     val wechatBotSetting: WechatBotSetting = WechatBotSetting(),
     val qqBotSetting: QqBotSetting = QqBotSetting(),

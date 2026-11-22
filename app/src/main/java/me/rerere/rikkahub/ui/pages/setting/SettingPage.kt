@@ -287,6 +287,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text("心跳机制") },
                     )
                     item(
+                        onClick = { navController.navigate(Screen.SettingWakeWord) },
+                        leadingContent = { Icon(HugeIcons.Mic01, null) },
+                        supportingContent = { Text("喊昵称唤醒 AI，自动弹出聊天页并回复（离线识别）") },
+                        headlineContent = { Text("语音唤醒") },
+                    )
+                    item(
                         onClick = { navController.navigate(Screen.SettingAnniversary) },
                         leadingContent = { Icon(HugeIcons.InLove, null) },
                         supportingContent = { Text("让 AI 记得农历/阳历生日、在一起天数、节日和节气") },

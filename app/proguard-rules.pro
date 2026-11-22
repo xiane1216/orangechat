@@ -26,6 +26,9 @@
 # keep jlatexmath
 -keep class org.scilab.forge.jlatexmath.** {*;}
 
+# sherpa-onnx (语音唤醒): JNI 按字段名读写 Kotlin 配置/结果类, 禁止 R8 裁剪
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+
 -dontwarn com.google.re2j.**
 -dontobfuscate
 

@@ -401,7 +401,9 @@ suspend fun SupabaseService.collectAndUpload(context: Context): Result<Unit> {
                 val appUsageService = AppUsageService(context)
                 val result = appUsageService.getForegroundApp()
                 if (result.isSuccess) {
-                    foregroundApp = result.getOrThrow()
+                    val fg = result.getOrThrow()
+                    // 同步应用名+包名, 对端 AI 看不懂裸包名
+                    foregroundApp = if (fg.appName != fg.packageName) "${fg.appName}（${fg.packageName}）" else fg.packageName
                 }
             }
         } catch (e: Exception) {
