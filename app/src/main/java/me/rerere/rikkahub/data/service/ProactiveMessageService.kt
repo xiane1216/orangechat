@@ -301,17 +301,17 @@ class ProactiveMessageService : KoinComponent {
             Log.w(TAG, "Failed to get app usage context", e)
         }
 
-        // 最近一次亮屏使用手机的全局时刻(含桌面), 息屏后不再更新.
-        // 让 AI 判断用户是否在休息/忙碌, 避免深夜还以为用户醒着
+        // 最近一次亮屏使用手机的全局时刻: 统计进出前台 + 亮屏/息屏事件,
+        // 息屏那一刻即"放下手机"的时刻, 静默时长由此起算. 让 AI 判断用户是否在休息/忙碌
         try {
             val appUsageService = AppUsageService(context)
-            val lastActiveResult = appUsageService.getLastUserActivityTime()
-            if (lastActiveResult.isSuccess) {
-                val lastActive = lastActiveResult.getOrThrow()
+            val lastInfoResult = appUsageService.getLastActivityInfo()
+            if (lastInfoResult.isSuccess) {
+                val lastInfo = lastInfoResult.getOrThrow()
                 val timeSdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                val silentMinutes = (currentTime - lastActive) / 60000
+                val silentMinutes = (currentTime - lastInfo.lastActivityTime) / 60000
                 val silentText = if (silentMinutes < 1) "刚刚还在用" else "已静默 ${silentMinutes}分钟"
-                sb.appendLine("最近亮屏: ${timeSdf.format(java.util.Date(lastActive))}（$silentText）")
+                sb.appendLine("最近亮屏: ${timeSdf.format(java.util.Date(lastInfo.lastActivityTime))}（$silentText）")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get last screen active time", e)
@@ -324,7 +324,12 @@ class ProactiveMessageService : KoinComponent {
             if (foregroundResult.isSuccess) {
                 val foregroundApp = foregroundResult.getOrThrow()
                 val sinceMinutes = (currentTime - foregroundApp.sinceTimestamp) / 60000
-                sb.appendLine("当前前台应用: ${foregroundApp.appName}（${foregroundApp.packageName}，${sinceMinutes}分钟前进入）")
+                if (foregroundApp.screenOn == false) {
+                    // 屏幕已熄灭: 不能再说"当前前台", 避免 AI 误以为用户还在刷手机
+                    sb.appendLine("屏幕状态: 已熄屏（息屏前最后使用的应用: ${foregroundApp.appName}（${foregroundApp.packageName}））")
+                } else {
+                    sb.appendLine("当前前台应用: ${foregroundApp.appName}（${foregroundApp.packageName}，${sinceMinutes}分钟前进入）")
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get foreground app", e)

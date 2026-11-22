@@ -146,6 +146,38 @@ fun SettingWakeWordPage(vm: SettingVM = koinInject()) {
                 item {
                     CardGroup {
                         item(
+                            headlineContent = { Text("识别灵敏度") },
+                            supportingContent = { Text("被环境声误触发就调低，喊不动就调高；改完立即生效") },
+                        )
+                        item {
+                            androidx.compose.foundation.layout.Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                val options = listOf(
+                                    0 to "高灵敏（易误触）",
+                                    1 to "均衡",
+                                    2 to "抗噪（防误触）",
+                                )
+                                options.forEach { (value, label) ->
+                                    androidx.compose.material3.FilterChip(
+                                        selected = wakeWord.sensitivity == value,
+                                        onClick = {
+                                            updateSetting(wakeWord.copy(sensitivity = value))
+                                        },
+                                        label = { Text(label) },
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    CardGroup {
+                        item(
                             headlineContent = { Text("触发冷却（秒）") },
                             supportingContent = { Text("两次唤醒的最小间隔，防止连喊发多条消息，默认 30 秒") },
                         )

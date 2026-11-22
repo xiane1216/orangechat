@@ -21,4 +21,9 @@ data class WakeWordSetting(
     val wakeWord: String = "小橘",
     /** 触发冷却秒数, 防止连喊/误触连发消息, 默认 30 */
     val cooldownSeconds: Int = 30,
+    /**
+     * 识别灵敏度档位: 0=高灵敏(易唤醒也易误触), 1=均衡(默认), 2=抗噪(防误触)
+     * 映射到 KWS 的 keywordsThreshold/keywordsScore, 档位越高要求匹配置信度越高
+     */
+    val sensitivity: Int = 1,
 )

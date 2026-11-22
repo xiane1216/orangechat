@@ -63,7 +63,6 @@ class WakeWordService : Service(), KoinComponent {
     private val settingsStore: SettingsStore by inject()
     private val chatService: ChatService by inject()
     private val conversationRepository: ConversationRepository by inject()
-    private val appUsageService: AppUsageService by inject()
 
     private val serviceScope = CoroutineScope(
         SupervisorJob() + Dispatchers.Main + CoroutineExceptionHandler { _, e ->
@@ -134,7 +133,7 @@ class WakeWordService : Service(), KoinComponent {
                     stopSelf()
                     return@collect
                 }
-                if (setting.wakeWord != last.wakeWord) {
+                if (setting.wakeWord != last.wakeWord || setting.sensitivity != last.sensitivity) {
                     startListening(setting)
                 }
                 last = setting
@@ -198,7 +197,7 @@ class WakeWordService : Service(), KoinComponent {
             var readFailures = 0
 
             try {
-                spotter = WakeWordEngine.create(applicationContext, setting.wakeWord)
+                spotter = WakeWordEngine.create(applicationContext, setting.wakeWord, setting.sensitivity)
                 stream = spotter.createStream()
                 Log.i(TAG, "唤醒引擎就绪: ${setting.wakeWord}")
                 // 昵称可能在运行中被改: 引擎重建后同步刷新常驻通知文案
@@ -320,6 +319,15 @@ class WakeWordService : Service(), KoinComponent {
         lastTriggerAt = now
         vibrate()
 
+        // 先取前台应用 (必须在跳转之前, 跳转后前台就是本 App 自己了).
+        // 直接 new, AppUsageService 未注册进 Koin, inject 会 resolve 失败.
+        // 拿不到应用名/权限未开时退化为不带前台的简短提醒.
+        val fgName = runCatching {
+            AppUsageService(applicationContext).getForegroundApp().getOrNull()?.let {
+                if (it.screenOn == false) null else it.appName // 熄屏状态下没有"正在刷"一说, 不带前台
+            }
+        }.getOrNull()
+
         val settings = settingsStore.settingsFlow.first()
         val assistant = settings.getCurrentAssistant()
         // 当前助手最近的会话; 没有则新建 (与心跳目标选择一致)
@@ -349,9 +357,6 @@ class WakeWordService : Service(), KoinComponent {
         // 以用户身份插入唤醒提醒 -> 自动生成回复.
         // 系统提醒式叙述: 告诉 AI 用户此刻在前台刷什么 + 是喊出来的, 不扮演用户口吻.
         try {
-            val fgName = runCatching {
-                appUsageService.getForegroundApp().getOrNull()?.appName
-            }.getOrNull()
             val text = if (!fgName.isNullOrBlank()) {
                 "[语音唤醒] 宝宝当前的前台是在刷「$fgName」，宝宝叫了你一下。"
             } else {

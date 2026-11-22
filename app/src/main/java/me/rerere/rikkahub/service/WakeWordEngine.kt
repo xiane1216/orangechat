@@ -130,10 +130,11 @@ object WakeWordEngine {
 
     /**
      * 校验 + 写 keywords.txt + 创建 KeywordSpotter 实例.
+     * @param sensitivity 灵敏度档位: 0=高灵敏, 1=均衡(默认), 2=抗噪
      * @throws IllegalArgumentException 昵称不可用时 (message 可直接展示给用户)
      * @throws IllegalStateException 模型文件未就绪/引擎创建失败时
      */
-    fun create(context: Context, wakeWord: String): KeywordSpotter {
+    fun create(context: Context, wakeWord: String, sensitivity: Int = 1): KeywordSpotter {
         val dir = getModelDir(context)
         if (!ensureModelFiles(context) || !File(dir, ENCODER_FILE).exists()) {
             throw IllegalStateException("唤醒模型文件未就绪")
@@ -142,6 +143,13 @@ object WakeWordEngine {
         val keywordsFile = getKeywordsFile(context)
         // keywords.txt 换内容即换唤醒词, 重建引擎时直接覆盖
         keywordsFile.writeText("$line\n")
+
+        // 阈值语义: 越高要求关键词 token 置信度越高 -> 越难触发 (更不容易被环境声误触)
+        val (threshold, score) = when (sensitivity) {
+            0 -> 0.25f to 1.5f // 高灵敏
+            2 -> 0.60f to 2.5f // 抗噪
+            else -> 0.45f to 2.0f // 均衡 (默认)
+        }
 
         val spotter = KeywordSpotter(
             config = KeywordSpotterConfig(
@@ -157,9 +165,11 @@ object WakeWordEngine {
                     modelType = "zipformer2",
                 ),
                 keywordsFile = keywordsFile.absolutePath,
+                keywordsThreshold = threshold,
+                keywordsScore = score,
             )
         )
-        Log.i(TAG, "KeywordSpotter created, keyword line: $line")
+        Log.i(TAG, "KeywordSpotter created, keyword line: $line, sensitivity=$sensitivity (threshold=$threshold, score=$score)")
         return spotter
     }
 

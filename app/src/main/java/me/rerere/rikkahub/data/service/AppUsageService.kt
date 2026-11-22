@@ -32,12 +32,22 @@ data class AppTrajectoryEvent(
 )
 
 /**
- * 当前前台应用信息: 包名 + 应用名 + 最近一次进入前台的时间
+ * 当前前台应用信息: 包名 + 应用名 + 最近一次进入前台的时间 + 屏幕亮灭状态
  */
 data class ForegroundAppInfo(
     val packageName: String,
     val appName: String,
-    val sinceTimestamp: Long
+    val sinceTimestamp: Long,
+    /** 屏幕当前是否亮着; null=系统没上报过屏幕事件(旧系统), 无法判断 */
+    val screenOn: Boolean?
+)
+
+/**
+ * 用户最近一次活动信息: 时刻 + 屏幕亮灭状态
+ */
+data class LastActivityInfo(
+    val lastActivityTime: Long,
+    val screenOn: Boolean?
 )
 
 class AppUsageService(private val context: Context) {
@@ -241,13 +251,19 @@ class AppUsageService(private val context: Context) {
         val event = UsageEvents.Event()
         var foregroundPackage: String? = null
         var sinceTimestamp = 0L
+        // 亮屏/息屏事件 (API 30+ 才有, 旧系统收不到这类事件保持 null)
+        var screenOn: Boolean? = null
 
         // 事件按时间顺序返回, 后出现的覆盖先出现的, 遍历完即为最近一次进入前台的应用
         while (usageEvents.hasNextEvent()) {
             usageEvents.getNextEvent(event)
-            if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
-                foregroundPackage = event.packageName
-                sinceTimestamp = event.timeStamp
+            when (event.eventType) {
+                UsageEvents.Event.MOVE_TO_FOREGROUND -> {
+                    foregroundPackage = event.packageName
+                    sinceTimestamp = event.timeStamp
+                }
+                UsageEvents.Event.SCREEN_INTERACTIVE -> screenOn = true
+                UsageEvents.Event.SCREEN_NON_INTERACTIVE -> screenOn = false
             }
         }
 
@@ -255,36 +271,45 @@ class AppUsageService(private val context: Context) {
         ForegroundAppInfo(
             packageName = pkg,
             appName = getAppName(pkg),
-            sinceTimestamp = sinceTimestamp
+            sinceTimestamp = sinceTimestamp,
+            screenOn = screenOn
         )
     }
 
     /**
-     * 获取用户最近一次操作手机的时间: 最近24小时内最后一个"进前台/退后台"事件的时刻(含桌面).
-     * 息屏期间不会产生这类事件, 因此该值即"最近亮屏使用手机"的时刻,
-     * 与系统设置里屏幕使用时间页的"最近使用"语义一致.
-     * 注意: 不统计息屏事件(SCREEN_NON_INTERACTIVE), 否则息屏瞬间会被当成"还在用手机".
+     * 获取用户最近一次活动信息: 时刻 + 屏幕亮灭状态.
+     * 统计范围: 进前台/退后台事件 + 亮屏/息屏事件(SCREEN_INTERACTIVE / SCREEN_NON_INTERACTIVE).
+     * 把息屏事件算进"最后活动"的原因: 按下电源键放下手机的那一刻就是真实意义上"最后一次碰手机",
+     * 否则一直停在同一个 app 里刷(无切换事件)时, 静默时间会从"进入这个 app"开始虚算, 差出几十分钟.
+     * 屏幕事件 API 30+ 才有, 旧系统退化为只用进出前台事件(误差=息屏前最后一段使用时间).
      */
-    fun getLastUserActivityTime(): Result<Long> = runCatching {
+    fun getLastActivityInfo(): Result<LastActivityInfo> = runCatching {
         val endTime = System.currentTimeMillis()
         val startTime = endTime - 24 * 60 * 60 * 1000L
 
         val usageEvents = usageStatsManager.queryEvents(startTime, endTime)
         val event = UsageEvents.Event()
         var lastActivity = 0L
+        var screenOn: Boolean? = null
 
         while (usageEvents.hasNextEvent()) {
             usageEvents.getNextEvent(event)
             when (event.eventType) {
                 UsageEvents.Event.MOVE_TO_FOREGROUND,
-                UsageEvents.Event.MOVE_TO_BACKGROUND -> if (event.timeStamp > lastActivity) {
-                    lastActivity = event.timeStamp
+                UsageEvents.Event.MOVE_TO_BACKGROUND,
+                UsageEvents.Event.SCREEN_INTERACTIVE,
+                UsageEvents.Event.SCREEN_NON_INTERACTIVE -> {
+                    if (event.timeStamp > lastActivity) lastActivity = event.timeStamp
                 }
+            }
+            when (event.eventType) {
+                UsageEvents.Event.SCREEN_INTERACTIVE -> screenOn = true
+                UsageEvents.Event.SCREEN_NON_INTERACTIVE -> screenOn = false
             }
         }
 
         if (lastActivity <= 0L) throw IllegalStateException("无法获取最近使用时间")
-        lastActivity
+        LastActivityInfo(lastActivityTime = lastActivity, screenOn = screenOn)
     }
 
     fun formatUsageTime(millis: Long): String {
