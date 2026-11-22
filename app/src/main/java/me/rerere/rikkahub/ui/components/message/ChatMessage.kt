@@ -1610,18 +1610,38 @@ internal fun AudioPlayerBubble(
 }
 
 /**
- * 细线播放/暂停图标: 圆角描边三角 / 双竖条, 线条纤细比实心圆图标更精致
+ * 细线播放/暂停图标: 细描边圆圈 + 圆角三角/双竖条, 圆润纤细
  */
 @Composable
 private fun VoicePlayIcon(isPlaying: Boolean, color: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
-        val stroke = 1.8.dp.toPx()
+        val stroke = 1.4.dp.toPx()
+        drawCircle(
+            color,
+            radius = (size.minDimension - stroke) / 2f,
+            style = Stroke(width = stroke)
+        )
         if (!isPlaying) {
-            val p1 = androidx.compose.ui.geometry.Offset(size.width * 0.34f, size.height * 0.22f)
-            val p2 = androidx.compose.ui.geometry.Offset(size.width * 0.34f, size.height * 0.78f)
-            val p3 = androidx.compose.ui.geometry.Offset(size.width * 0.84f, size.height * 0.5f)
+            // 圆角三角 (顶点用贝塞尔圆化), 细描边
+            val a = androidx.compose.ui.geometry.Offset(size.width * 0.40f, size.height * 0.30f)
+            val b = androidx.compose.ui.geometry.Offset(size.width * 0.40f, size.height * 0.70f)
+            val c = androidx.compose.ui.geometry.Offset(size.width * 0.76f, size.height * 0.50f)
+            fun dir(from: androidx.compose.ui.geometry.Offset, to: androidx.compose.ui.geometry.Offset): androidx.compose.ui.geometry.Offset {
+                val dx = to.x - from.x; val dy = to.y - from.y
+                val len = kotlin.math.sqrt(dx * dx + dy * dy)
+                return androidx.compose.ui.geometry.Offset(dx / len, dy / len)
+            }
+            val ab = dir(a, b); val bc = dir(b, c); val ca = dir(c, a)
+            val r = size.minDimension * 0.09f
             val path = androidx.compose.ui.graphics.Path().apply {
-                moveTo(p1.x, p1.y); lineTo(p2.x, p2.y); lineTo(p3.x, p3.y); close()
+                moveTo(a.x + ab.x * r, a.y + ab.y * r)
+                lineTo(b.x - ab.x * r, b.y - ab.y * r)
+                quadraticBezierTo(b.x, b.y, b.x + bc.x * r, b.y + bc.y * r)
+                lineTo(c.x - bc.x * r, c.y - bc.y * r)
+                quadraticBezierTo(c.x, c.y, c.x + ca.x * r, c.y + ca.y * r)
+                lineTo(a.x - ca.x * r, a.y - ca.y * r)
+                quadraticBezierTo(a.x, a.y, a.x + ab.x * r, a.y + ab.y * r)
+                close()
             }
             drawPath(
                 path, color,
@@ -1630,14 +1650,14 @@ private fun VoicePlayIcon(isPlaying: Boolean, color: Color, modifier: Modifier =
         } else {
             drawLine(
                 color,
-                start = androidx.compose.ui.geometry.Offset(size.width * 0.36f, size.height * 0.24f),
-                end = androidx.compose.ui.geometry.Offset(size.width * 0.36f, size.height * 0.76f),
+                start = androidx.compose.ui.geometry.Offset(size.width * 0.44f, size.height * 0.36f),
+                end = androidx.compose.ui.geometry.Offset(size.width * 0.44f, size.height * 0.64f),
                 strokeWidth = stroke, cap = StrokeCap.Round
             )
             drawLine(
                 color,
-                start = androidx.compose.ui.geometry.Offset(size.width * 0.66f, size.height * 0.24f),
-                end = androidx.compose.ui.geometry.Offset(size.width * 0.66f, size.height * 0.76f),
+                start = androidx.compose.ui.geometry.Offset(size.width * 0.58f, size.height * 0.36f),
+                end = androidx.compose.ui.geometry.Offset(size.width * 0.58f, size.height * 0.64f),
                 strokeWidth = stroke, cap = StrokeCap.Round
             )
         }
@@ -1832,7 +1852,7 @@ internal fun VoiceMessageBubble(
                     isPlaying = isPlaying,
                     color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(24.dp)
                 )
                 // Waveform bars
                 val waveformBars = remember(voiceMessage.url) {

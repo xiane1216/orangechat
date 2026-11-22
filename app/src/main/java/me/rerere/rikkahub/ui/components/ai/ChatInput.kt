@@ -294,28 +294,39 @@ fun ChatInput(
     }
 
     // Handle voice message completion
-    // 松手后: 停止双录音 -> 等云端转写收尾(若在用) -> 本地 SenseVoice 提取语气/声音事件 -> 回调发送
+    // 松手后: 停止双录音 -> 云端收尾与本地情绪识别【并行】-> 回调发送 (提速: 串行改并行)
     suspend fun finalizeVoiceMessage(path: String, cloudUsed: Boolean) {
         var emotion = ""
         var events = ""
         var transcript = ""
-        // 云端转写收尾: 等 controller 回到 Idle (最后一段 flush 完成, transcript 稳定), 最多等 4s
-        if (cloudUsed) {
-            val deadline = System.currentTimeMillis() + 4000
-            while (System.currentTimeMillis() < deadline && asrState.status != ASRStatus.Idle) {
-                delay(150)
-            }
-            transcript = asrState.transcript
-        }
+        var localText = ""
         val wavFile = java.io.File(path)
-        if (senseVoiceReady.value && !isVoiceCallActive) {
-            runCatching {
-                val r = senseVoiceManager.recognize(wavFile)
-                emotion = r.emotion
-                events = r.voiceEvents
-                if (transcript.isBlank()) transcript = r.text
-            }.onFailure { Log.w("ChatInput", "sensevoice recognize failed", it) }
+        kotlinx.coroutines.coroutineScope {
+            // 任务1: 云端转写收尾, 等 controller 回到 Idle (上限 2.5s, 轮询 100ms)
+            val cloudJob = launch {
+                if (cloudUsed) {
+                    val deadline = System.currentTimeMillis() + 2500
+                    while (System.currentTimeMillis() < deadline && asrState.status != ASRStatus.Idle) {
+                        delay(100)
+                    }
+                    transcript = asrState.transcript
+                }
+            }
+            // 任务2: 本地 SenseVoice 识别语气/声音事件 (内部已切 Default 线程池)
+            if (senseVoiceReady.value && !isVoiceCallActive) {
+                launch {
+                    runCatching {
+                        val r = senseVoiceManager.recognize(wavFile)
+                        emotion = r.emotion
+                        events = r.voiceEvents
+                        localText = r.text
+                    }.onFailure { Log.w("ChatInput", "sensevoice recognize failed", it) }
+                }
+            }
+            cloudJob.join()
         }
+        // 两路都结束后合并: 云端转写优先, 本地兜底
+        if (transcript.isBlank()) transcript = localText
         // durationMs 上游从未赋值恒为 0, 从 WAV 头兜底计算秒数
         val durationSec = runCatching { senseVoiceManager.wavDurationSec(wavFile) }.getOrDefault(0L)
         onVoiceMessage?.invoke(path, durationSec, transcript, emotion, events)
