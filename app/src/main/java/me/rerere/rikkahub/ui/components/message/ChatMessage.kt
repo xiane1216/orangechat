@@ -68,6 +68,9 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
@@ -815,10 +818,43 @@ private fun MessageContentBlock(
         }
 
         is UIMessagePart.VoiceMessage -> {
-            VoiceMessageBubble(
-                voiceMessage = part,
-                isUser = role == MessageRole.USER,
-            )
+            // 转写/语气行在气泡外下方 (与 meta 小字同款样式), 气泡本体只有播放条
+            val isUserMsg = role == MessageRole.USER
+            Column(
+                horizontalAlignment = if (isUserMsg) Alignment.End else Alignment.Start
+            ) {
+                VoiceMessageBubble(
+                    voiceMessage = part,
+                    isUser = isUserMsg,
+                )
+                if (part.transcript.isNotBlank()) {
+                    Text(
+                        text = part.transcript,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        modifier = Modifier.padding(top = 3.dp),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                val emoLine = buildString {
+                    if (part.emotion.isNotBlank()) append(part.emotion)
+                    if (part.voiceEvents.isNotBlank()) {
+                        if (isNotEmpty()) append(" · ")
+                        append(part.voiceEvents.split(",").joinToString(" · "))
+                    }
+                }
+                if (emoLine.isNotBlank()) {
+                    Text(
+                        text = emoLine,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        modifier = Modifier.padding(top = 2.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
 
         is UIMessagePart.Image -> {
@@ -1573,6 +1609,41 @@ internal fun AudioPlayerBubble(
 }
 
 /**
+ * 细线播放/暂停图标: 圆角描边三角 / 双竖条, 线条纤细比实心圆图标更精致
+ */
+@Composable
+private fun VoicePlayIcon(isPlaying: Boolean, color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.8.dp.toPx()
+        if (!isPlaying) {
+            val p1 = androidx.compose.ui.geometry.Offset(size.width * 0.34f, size.height * 0.22f)
+            val p2 = androidx.compose.ui.geometry.Offset(size.width * 0.34f, size.height * 0.78f)
+            val p3 = androidx.compose.ui.geometry.Offset(size.width * 0.84f, size.height * 0.5f)
+            val path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(p1.x, p1.y); lineTo(p2.x, p2.y); lineTo(p3.x, p3.y); close()
+            }
+            drawPath(
+                path, color,
+                style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+        } else {
+            drawLine(
+                color,
+                start = androidx.compose.ui.geometry.Offset(size.width * 0.36f, size.height * 0.24f),
+                end = androidx.compose.ui.geometry.Offset(size.width * 0.36f, size.height * 0.76f),
+                strokeWidth = stroke, cap = StrokeCap.Round
+            )
+            drawLine(
+                color,
+                start = androidx.compose.ui.geometry.Offset(size.width * 0.66f, size.height * 0.24f),
+                end = androidx.compose.ui.geometry.Offset(size.width * 0.66f, size.height * 0.76f),
+                strokeWidth = stroke, cap = StrokeCap.Round
+            )
+        }
+    }
+}
+
+/**
  * TTS 语音条 (text_to_speech 工具): v4 定稿独立消息样式,
  * 外壳与 AI 气泡完全同款 (宽度/圆角/毛玻璃/背景图/颜色/透明度全部跟随气泡设置),
  * 唯一独立的是播放键圆圈颜色 (voicePlayButtonColor, 默认思考链爱心玫瑰粉),
@@ -1747,12 +1818,12 @@ internal fun VoiceMessageBubble(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(
-                    imageVector = if (isPlaying) HugeIcons.PauseCircle else HugeIcons.PlayCircle,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
-                    tint = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer
+                // 细线播放/暂停图标 (比 HugeIcons 实心圆更精致)
+                VoicePlayIcon(
+                    isPlaying = isPlaying,
+                    color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(28.dp)
                 )
                 // Waveform bars
                 val waveformBars = remember(voiceMessage.url) {
@@ -1782,37 +1853,6 @@ internal fun VoiceMessageBubble(
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-            }
-            // Show transcript text below the voice bubble (like WeChat)
-            if (voiceMessage.transcript.isNotBlank()) {
-                Text(
-                    text = voiceMessage.transcript,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    modifier = Modifier.padding(top = 4.dp),
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            // 语气 + 声音事件行: 与转写小字同款样式 (bodySmall 70%), 由本地 SenseVoice 识别
-            val emoLine = buildString {
-                if (voiceMessage.emotion.isNotBlank()) append(voiceMessage.emotion)
-                if (voiceMessage.voiceEvents.isNotBlank()) {
-                    if (isNotEmpty()) append(" · ")
-                    append(voiceMessage.voiceEvents.split(",").joinToString(" · "))
-                }
-            }
-            if (emoLine.isNotBlank()) {
-                Text(
-                    text = emoLine,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    modifier = Modifier.padding(top = 2.dp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
