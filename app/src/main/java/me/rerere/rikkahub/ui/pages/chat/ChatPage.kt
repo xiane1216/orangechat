@@ -371,7 +371,7 @@ private fun ChatPageContent(
                             }
                             inputState.clearInput()
                         },
-                        onVoiceMessage = { url, duration, transcript ->
+                        onVoiceMessage = { url, duration, transcript, emotion, voiceEvents ->
                             if (currentChatModel == null) {
                                 toaster.show("请先选择模型", type = ToastType.Error)
                                 return@ChatInput
@@ -382,6 +382,8 @@ private fun ChatPageContent(
                                         url = url,
                                         duration = duration,
                                         transcript = transcript,
+                                        emotion = emotion,
+                                        voiceEvents = voiceEvents,
                                     )
                                 )
                             )

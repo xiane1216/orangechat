@@ -210,8 +210,9 @@ class WakeWordService : Service(), KoinComponent {
                 return@launch
             }
 
-            // 优先级: 音频线程提权, 减少拾音丢块
-            runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO) }
+            // 优先级: 略低于主线程(FOREGROUND), 避免常驻拾音推理抢占 UI 帧率导致聊天动画卡顿;
+            // AudioRecord 自带缓冲, 100ms 周期的读取延迟不会丢块, 识别率不受影响
+            runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_FOREGROUND) }
 
             val buf = ShortArray(1600) // 100ms @16kHz
             try {

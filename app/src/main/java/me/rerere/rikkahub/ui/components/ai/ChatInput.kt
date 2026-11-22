@@ -13,13 +13,22 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.content.MediaType
 import androidx.compose.foundation.content.ReceiveContentListener
 import androidx.compose.foundation.content.consume
@@ -65,6 +74,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
@@ -73,6 +84,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -91,6 +103,8 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
@@ -157,7 +171,7 @@ fun ChatInput(
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
     onLongSendClick: () -> Unit,
-    onVoiceMessage: ((url: String, duration: Long, transcript: String) -> Unit)? = null,
+    onVoiceMessage: ((url: String, duration: Long, transcript: String, emotion: String, voiceEvents: String) -> Unit)? = null,
     autoStartVoice: Boolean = false,
 ) {
     val toaster = LocalToaster.current
@@ -198,6 +212,7 @@ fun ChatInput(
 
     val context = LocalContext.current
     val filesManager: FilesManager = koinInject()
+    val senseVoiceManager: me.rerere.rikkahub.data.voice.SenseVoiceManager = koinInject()
     val asr = LocalASRState.current
     val asrState by asr.state.collectAsState()
     val voiceCallActiveId by VoiceCallService.activeConversationId.collectAsStateWithLifecycle()
@@ -211,6 +226,38 @@ fun ChatInput(
     PermissionManager(permissionState = asrPermission)
     var asrBaseText by remember { mutableStateOf("") }
     var voiceMessageMode by remember { mutableStateOf(false) }
+
+    // ===== 微信式按住说话 =====
+    var voiceMode by rememberSaveable { mutableStateOf(false) }
+    var pressing by remember { mutableStateOf(false) }
+    var recordSecs by remember { mutableStateOf(0) }
+    var showModelDownloadDialog by remember { mutableStateOf(false) }
+    var modelDownloadingText by remember { mutableStateOf<String?>(null) }
+    val mainScope = rememberCoroutineScope()
+    val senseVoiceReady = remember { mutableStateOf(senseVoiceManager.isModelReady()) }
+    var localRecorder by remember { mutableStateOf<me.rerere.rikkahub.data.voice.LocalVoiceRecorder?>(null) }
+    var usingLocalRecorder by remember { mutableStateOf(false) }
+    // 下载进度监听 (模型首次下载时更新 pill 文案)
+    LaunchedEffect(Unit) {
+        senseVoiceManager.downloadState.collect { st ->
+            when {
+                st.done -> { senseVoiceReady.value = true; modelDownloadingText = null }
+                st.isDownloading && st.totalBytes > 0 ->
+                    modelDownloadingText = "模型下载中 ${st.receivedBytes * 100 / st.totalBytes}%"
+                st.error != null -> modelDownloadingText = null
+            }
+        }
+    }
+    // 按住时计时
+    LaunchedEffect(pressing) {
+        if (pressing) {
+            val start = System.currentTimeMillis()
+            while (pressing) {
+                recordSecs = ((System.currentTimeMillis() - start) / 1000).toInt()
+                delay(100)
+            }
+        }
+    }
 
     // Auto-start voice recording when entering from voice call notification
     LaunchedEffect(autoStartVoice) {
@@ -247,15 +294,62 @@ fun ChatInput(
     }
 
     // Handle voice message completion
+    // 松手后: 停止录音 -> 本地 SenseVoice 提取语气/声音事件 (云端转写为空时兜底文字) -> 回调发送
+    suspend fun finalizeVoiceMessage(path: String, cloudTranscript: String) {
+        var emotion = ""
+        var events = ""
+        var transcript = cloudTranscript
+        val wavFile = java.io.File(path)
+        if (senseVoiceReady.value && !isVoiceCallActive) {
+            runCatching {
+                val r = senseVoiceManager.recognize(wavFile)
+                emotion = r.emotion
+                events = r.voiceEvents
+                if (transcript.isBlank()) transcript = r.text
+            }.onFailure { Log.w("ChatInput", "sensevoice recognize failed", it) }
+        }
+        // durationMs 上游从未赋值恒为 0, 从 WAV 头兜底计算秒数
+        val durationSec = if (asrState.durationMs > 0 && !usingLocalRecorder) asrState.durationMs
+        else runCatching { senseVoiceManager.wavDurationSec(wavFile) }.getOrDefault(0L)
+        onVoiceMessage?.invoke(path, durationSec, transcript, emotion, events)
+    }
+
     LaunchedEffect(asrState.audioFilePath, voiceMessageMode) {
         if (voiceMessageMode && asrState.audioFilePath != null && asrState.status == ASRStatus.Idle) {
-            onVoiceMessage?.invoke(
-                asrState.audioFilePath!!,
-                asrState.durationMs,
-                asrState.transcript
-            )
+            val path = asrState.audioFilePath!!
+            val cloudTranscript = asrState.transcript
+            finalizeVoiceMessage(path, cloudTranscript)
             voiceMessageMode = false
         }
+    }
+
+    // 首次使用按住说话: 本地情绪识别模型下载确认 (约228MB, 仅一次, 本地离线运行)
+    if (showModelDownloadDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showModelDownloadDialog = false },
+            title = { Text("下载语音情绪识别模型") },
+            text = {
+                Text(
+                    "按住说话时可以用本地模型识别你说话的语气（开心、难过、生气）和声音（哭声、笑声、叹气等），" +
+                        "让对方听得出你的情绪，完全离线、不上传录音。\n\n" +
+                        "模型约 228MB，仅下载一次，建议在 Wi-Fi 下进行。"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showModelDownloadDialog = false
+                        modelDownloadingText = "模型下载中 0%"
+                        mainScope.launch {
+                            senseVoiceManager.startDownload()
+                        }
+                    }
+                ) { Text("下载") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showModelDownloadDialog = false }) { Text("取消") }
+            }
+        )
     }
 
     // Camera launcher
@@ -678,32 +772,155 @@ fun ChatInput(
                                 )
                             }
 
-                            TextInputRow(
-                                state = state,
-                                onSendMessage = { sendMessage() },
-                                modifier = Modifier.weight(1f),
-                            )
-
-                            // Voice button: click to record, click again to stop and send
-                            // 通话进行中禁用, 避免两路麦克风冲突
-                            if ((asrState.isAvailable || asrState.isRecording) && !isVoiceCallActive) {
-                                ActionIconButton(
-                                    onClick = {
-                                        when (asrState.status) {
-                                            ASRStatus.Listening -> {
-                                                asr.stop()
+                            if (voiceMode) {
+                                // 微信式「按住 说话」: 按下开始录音, 松手发送
+                                // 模型未就绪显示下载进度, 下载完成后即可用 (本地识别无需云端 ASR)
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(42.dp)
+                                        .clip(RoundedCornerShape(21.dp))
+                                        .background(
+                                            when {
+                                                modelDownloadingText != null -> MaterialTheme.colorScheme.surfaceContainerHighest
+                                                pressing -> MaterialTheme.colorScheme.primaryContainer
+                                                else -> MaterialTheme.colorScheme.surfaceContainerHigh
                                             }
-                                            ASRStatus.Idle, ASRStatus.Error -> {
-                                                if (!asrPermission.allRequiredPermissionsGranted) {
-                                                    asrPermission.requestPermissions()
-                                                } else {
-                                                    voiceMessageMode = true
-                                                    asr.start { transcript ->
-                                                        // Ignore transcript in voice message mode
+                                        )
+                                        .pointerInput(senseVoiceReady.value) {
+                                            awaitPointerEventScope {
+                                                while (true) {
+                                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                                    down.consume()
+                                                    if (!pressing && modelDownloadingText == null) {
+                                                        when {
+                                                            !asrPermission.allRequiredPermissionsGranted -> {
+                                                                asrPermission.requestPermissions()
+                                                            }
+                                                            !senseVoiceReady.value -> {
+                                                                showModelDownloadDialog = true
+                                                            }
+                                                            else -> {
+                                                                // 云端 ASR 可能未配置 (start 会抛异常), 失败时走本地录音兜底
+                                                                var started = false
+                                                                try {
+                                                                    voiceMessageMode = true
+                                                                    asr.start { }
+                                                                    started = true
+                                                                } catch (e: Exception) {
+                                                                    Log.w("ChatInput", "cloud asr start failed, fallback to local recorder", e)
+                                                                }
+                                                                if (started) {
+                                                                    usingLocalRecorder = false
+                                                                    pressing = true
+                                                                    recordSecs = 0
+                                                                } else {
+                                                                    val rec = me.rerere.rikkahub.data.voice.LocalVoiceRecorder(context)
+                                                                    if (rec.start()) {
+                                                                        voiceMessageMode = true
+                                                                        localRecorder = rec
+                                                                        usingLocalRecorder = true
+                                                                        pressing = true
+                                                                        recordSecs = 0
+                                                                    } else {
+                                                                        voiceMessageMode = false
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    waitForUpOrCancellation()
+                                                    if (pressing) {
+                                                        pressing = false
+                                                        if (usingLocalRecorder) {
+                                                            // 本地录音: 手动收尾 (不经过 asrState)
+                                                            val path = localRecorder?.stop()
+                                                            localRecorder = null
+                                                            usingLocalRecorder = false
+                                                            if (path != null && voiceMessageMode) {
+                                                                val p = path
+                                                                mainScope.launch { finalizeVoiceMessage(p, "") }
+                                                            }
+                                                            voiceMessageMode = false
+                                                        } else {
+                                                            asr.stop() // asrState 更新后由 LaunchedEffect 收尾
+                                                        }
                                                     }
                                                 }
                                             }
-                                            ASRStatus.Connecting, ASRStatus.Stopping -> {}
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (modelDownloadingText != null) {
+                                        Text(
+                                            text = modelDownloadingText!!,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    } else if (pressing) {
+                                        // 录音中: 渐变音波 + 计时 + 松手提示
+                                        val wavePhase by rememberInfiniteTransition(label = "wave").animateFloat(
+                                            initialValue = 0f,
+                                            targetValue = 1f,
+                                            animationSpec = infiniteRepeatable(
+                                                tween(durationMillis = 900, easing = LinearEasing)
+                                            ),
+                                            label = "wavePhase",
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        ) {
+                                            repeat(15) { i ->
+                                                val c = Math.abs(i - 7) / 7f
+                                                val h = 6 + 12 * (0.5 + 0.5 * Math.sin(wavePhase * 2 * Math.PI + c * 3.2)).toFloat()
+                                                Box(
+                                                    Modifier
+                                                        .padding(horizontal = 0.75.dp)
+                                                        .size(width = 2.5.dp, height = h.dp)
+                                                        .clip(CircleShape)
+                                                        .background(MaterialTheme.colorScheme.primary)
+                                                )
+                                            }
+                                            Text(
+                                                text = " $recordSecs″ · 松手 发送",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            )
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "按住 说话",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            } else {
+                                TextInputRow(
+                                    state = state,
+                                    onSendMessage = { sendMessage() },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+
+                            // Voice button: 切换 打字/按住说话 模式 (微信式)
+                            // 本地情绪识别模式下不再依赖云端 ASR 配置; 通话进行中禁用, 避免两路麦克风冲突
+                            if (!isVoiceCallActive) {
+                                ActionIconButton(
+                                    onClick = {
+                                        if (voiceMode) {
+                                            voiceMode = false
+                                            if (pressing) {
+                                                pressing = false
+                                                asr.stop()
+                                            }
+                                        } else {
+                                            if (!asrPermission.allRequiredPermissionsGranted) {
+                                                asrPermission.requestPermissions()
+                                            } else {
+                                                voiceMode = true
+                                            }
                                         }
                                     }
                                 ) {
@@ -717,7 +934,8 @@ fun ChatInput(
                                         Icon(
                                             imageVector = HugeIcons.Voice,
                                             contentDescription = "Voice",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            tint = if (voiceMode) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }

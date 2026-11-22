@@ -499,31 +499,56 @@ private fun ChatListNormal(
                     // 等待动画: 组结构 (AI 头像 28dp 在左 + 右侧三个 6dp 粉点跳动), 不再用兔子
                     val loadingAssistant = settings.getAssistantById(conversation.assistantId)
                     val loadingModel = loadingAssistant?.chatModelId?.let { settings.findModelById(it) }
-                    Row(
+                    // 最后一条是用户语音消息时, 等待区显示「他正在听你的语音…」
+                    // (loading 变 true 前语音消息已入列, 以 loading 为 key 重建即可)
+                    val isVoicePending = remember(loading) {
+                        loading && conversation.messageNodes.lastOrNull()
+                            ?.currentMessage?.takeIf { it.role == MessageRole.USER }
+                            ?.parts?.any { it is me.rerere.ai.ui.UIMessagePart.VoiceMessage } == true
+                    }
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        ChatMessageSideAvatar(
-                            isUser = false,
-                            model = loadingModel,
-                            assistant = loadingAssistant,
-                        )
                         Row(
-                            modifier = Modifier.padding(top = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            // 三个 6dp 粉点上下跳 (周期 1.1s, 相位差 0.15s), 与消息内等待态共用同一组件
-                            BouncingLoadingDots()
-                            AnimatedVisibility(
-                                visible = processingStatus != null,
-                                modifier = Modifier.padding(start = 4.dp),
+                            ChatMessageSideAvatar(
+                                isUser = false,
+                                model = loadingModel,
+                                assistant = loadingAssistant,
+                            )
+                            Row(
+                                modifier = Modifier.padding(top = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(
-                                    text = processingStatus ?: "",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                // 三个 6dp 粉点上下跳 (周期 1.1s, 相位差 0.15s), 与消息内等待态共用同一组件
+                                BouncingLoadingDots()
+                                AnimatedVisibility(
+                                    visible = processingStatus != null,
+                                    modifier = Modifier.padding(start = 4.dp),
+                                ) {
+                                    Text(
+                                        text = processingStatus ?: "",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
+                        }
+                        // 语音条等待提示: 透明无底色, 字体与「称呼·时间」小字一致 (fontSizeRatio 基准 9sp)
+                        AnimatedVisibility(visible = isVoicePending) {
+                            Text(
+                                text = "他正在听你的语音…",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = with(LocalDensity.current) {
+                                        (9 * settings.displaySetting.fontSizeRatio).sp
+                                    }
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
                         }
                     }
                 }

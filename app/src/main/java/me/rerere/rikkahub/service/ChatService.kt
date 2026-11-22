@@ -757,9 +757,15 @@ class ChatService(
             try {
                 if (message.role == MessageRole.USER) {
                     // 如果是用户消息，则截止到当前消息
+                    // 按消息 id 定位节点: 消息对象在生成过程中会被变换复制, 按内容 equals 匹配可能失配
+                    // 失配会拿到 -1 -> 空 messageRange -> 空对话生成 -> "重新生成不好使"
                     session.saveMutex.withLock {
                         val conversation = session.state.value
-                        val node = conversation.getMessageNodeByMessage(message)
+                        val node = conversation.getMessageNodeByMessageId(message.id)
+                        if (node == null) {
+                            Log.w(TAG, "regenerateAtMessage: node not found for message ${message.id}")
+                            return@launch
+                        }
                         val indexAt = conversation.messageNodes.indexOf(node)
                         val newConversation = conversation.copy(
                             messageNodes = conversation.messageNodes.subList(0, indexAt + 1)
@@ -770,7 +776,11 @@ class ChatService(
                 } else {
                     if (regenerateAssistantMsg) {
                         val conversation = session.state.value
-                        val node = conversation.getMessageNodeByMessage(message)
+                        val node = conversation.getMessageNodeByMessageId(message.id)
+                        if (node == null) {
+                            Log.w(TAG, "regenerateAtMessage: node not found for message ${message.id}")
+                            return@launch
+                        }
                         val nodeIndex = conversation.messageNodes.indexOf(node)
                         handleMessageComplete(conversationId, messageRange = 0..<nodeIndex)
                     } else {
@@ -782,6 +792,8 @@ class ChatService(
 
                 _generationDoneFlow.emit(conversationId)
             } catch (e: Exception) {
+                // 旧生成任务被 cancel 时会抛取消异常, 属正常流程, 不能当错误上报
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "regenerateAtMessage failed, conversationId=$conversationId", e)
                 addError(e, conversationId, title = context.getString(R.string.error_title_regenerate_message))
             }

@@ -449,6 +449,10 @@ sealed class UIMessagePart {
         val url: String,
         val duration: Long = 0,
         val transcript: String = "",
+        // 本地 SenseVoice 识别的语气 (如 "难过"/"开心"/"生气"), 空串表示未识别
+        val emotion: String = "",
+        // 本地识别到的声音事件, 逗号分隔 (如 "哭声,叹气")
+        val voiceEvents: String = "",
         override var metadata: JsonObject? = null
     ) : UIMessagePart()
 

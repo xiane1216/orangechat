@@ -1796,6 +1796,25 @@ internal fun VoiceMessageBubble(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            // 语气 + 声音事件行: 与转写小字同款样式 (bodySmall 70%), 由本地 SenseVoice 识别
+            val emoLine = buildString {
+                if (voiceMessage.emotion.isNotBlank()) append(voiceMessage.emotion)
+                if (voiceMessage.voiceEvents.isNotBlank()) {
+                    if (isNotEmpty()) append(" · ")
+                    append(voiceMessage.voiceEvents.split(",").joinToString(" · "))
+                }
+            }
+            if (emoLine.isNotBlank()) {
+                Text(
+                    text = emoLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(top = 2.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

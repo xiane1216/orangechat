@@ -62,6 +62,11 @@ val dataSourceModule = module {
         SettingsStore(context = get(), scope = get())
     }
 
+    // 本地 SenseVoice 语音情绪识别 (按住说话/语音条)
+    single {
+        me.rerere.rikkahub.data.voice.SenseVoiceManager(context = get())
+    }
+
     single {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
