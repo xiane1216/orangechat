@@ -43,6 +43,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.WakeWordSetting
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.repository.ConversationRepository
+import me.rerere.rikkahub.data.service.AppUsageService
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import kotlin.uuid.Uuid
@@ -62,6 +63,7 @@ class WakeWordService : Service(), KoinComponent {
     private val settingsStore: SettingsStore by inject()
     private val chatService: ChatService by inject()
     private val conversationRepository: ConversationRepository by inject()
+    private val appUsageService: AppUsageService by inject()
 
     private val serviceScope = CoroutineScope(
         SupervisorJob() + Dispatchers.Main + CoroutineExceptionHandler { _, e ->
@@ -344,13 +346,18 @@ class WakeWordService : Service(), KoinComponent {
             Log.e(TAG, "跳转聊天页失败", e)
         }
 
-        // 以用户身份插入唤醒消息 -> 自动生成回复
-        // 带上 [语音唤醒] 前缀, AI 能明确知道是喊出来的而不是打字
+        // 以用户身份插入唤醒提醒 -> 自动生成回复.
+        // 系统提醒式叙述: 告诉 AI 用户此刻在前台刷什么 + 是喊出来的, 不扮演用户口吻.
         try {
-            chatService.sendMessage(
-                conversationId,
-                listOf(UIMessagePart.Text("[语音唤醒] ${currentSetting.wakeWord}"))
-            )
+            val fgName = runCatching {
+                appUsageService.getForegroundApp().getOrNull()?.appName
+            }.getOrNull()
+            val text = if (!fgName.isNullOrBlank()) {
+                "宝宝当前的前台是在刷「$fgName」，宝宝叫了你一下。"
+            } else {
+                "宝宝叫了你一下。"
+            }
+            chatService.sendMessage(conversationId, listOf(UIMessagePart.Text(text)))
         } catch (e: Exception) {
             Log.e(TAG, "插入唤醒消息失败", e)
         }
