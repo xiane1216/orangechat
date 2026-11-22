@@ -275,13 +275,12 @@ fun ChatInput(
     LaunchedEffect(asrState.status) {
         when (asrState.status) {
             ASRStatus.Listening -> {
+                // 只保留震动, 不播提示音 (用户要求去掉叮声)
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
-                soundEffectPlayer.play(R.raw.asr_start)
             }
 
             ASRStatus.Stopping -> {
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                soundEffectPlayer.play(R.raw.asr_stop)
             }
 
             else -> {}
