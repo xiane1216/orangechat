@@ -782,9 +782,8 @@ fun ChatInput(
                                         .background(
                                             when {
                                                 modelDownloadingText != null -> MaterialTheme.colorScheme.surfaceContainerHighest
-                                                // 录音中底色跟随显示设置里的用户气泡颜色 (与聊天气泡同一取值逻辑)
-                                                pressing -> LocalDisplaySettings.current.userBubbleColor?.let { it.toComposeColor() }
-                                                    ?: MaterialTheme.colorScheme.secondaryContainer
+                                                // 录音中固定白色底 (用户指定), 不随主题/气泡色变化
+                                                pressing -> Color.White
                                                 else -> MaterialTheme.colorScheme.surfaceContainerHigh
                                             }
                                         )
@@ -895,7 +894,7 @@ fun ChatInput(
                                             Text(
                                                 text = " $recordSecs″ · 松手 发送",
                                                 style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                         }
                                     } else {

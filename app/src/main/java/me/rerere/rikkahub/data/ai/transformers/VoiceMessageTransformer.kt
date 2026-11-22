@@ -47,6 +47,9 @@ object VoiceMessageTransformer : InputMessageTransformer {
         sb.append("\n内容：").append(part.transcript.ifBlank { "（无法转写）" })
         if (part.emotion.isNotBlank()) {
             sb.append("\n语气：").append(part.emotion).append("（本地识别）")
+        } else {
+            // 明确告知"听过了但平静", 避免AI不确定是否有分析
+            sb.append("\n语气：平静（本地识别未检测到明显情绪波动）")
         }
         if (part.voiceEvents.isNotBlank()) {
             sb.append("\n声音：").append(part.voiceEvents.replace(",", "、"))

@@ -826,6 +826,7 @@ private fun MessageContentBlock(
                 VoiceMessageBubble(
                     voiceMessage = part,
                     isUser = isUserMsg,
+                    bubbleAlpha = bubbleAlpha,
                 )
                 if (part.transcript.isNotBlank()) {
                     Text(
@@ -1759,10 +1760,13 @@ private fun TtsMessageBubble(
 internal fun VoiceMessageBubble(
     voiceMessage: UIMessagePart.VoiceMessage,
     isUser: Boolean,
+    bubbleAlpha: Float = 1f,
 ) {
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    // 气泡外壳与普通消息气泡完全同款: 用户/助手气泡色 + 毛玻璃 + 背景图 + 圆角 + 透明度全跟随设置
+    val displaySettings = LocalDisplaySettings.current
  
     val durationSec = (voiceMessage.duration / 1000).coerceAtLeast(1)
  
@@ -1784,10 +1788,15 @@ internal fun VoiceMessageBubble(
         }
     }
  
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = if (isUser) MaterialTheme.colorScheme.secondaryContainer
-        else MaterialTheme.colorScheme.tertiaryContainer,
+    BubbleSurface(
+        imagePath = displaySettings.userBubbleImagePath,
+        cornerRadius = displaySettings.bubbleCornerRadius.dp,
+        color = if (isUser) displaySettings.userBubbleColor?.let { it.toComposeColor() }
+        ?: MaterialTheme.colorScheme.secondaryContainer
+        else displaySettings.assistantBubbleColor?.let { it.toComposeColor() }
+        ?: MaterialTheme.colorScheme.surfaceContainerHigh,
+        overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
+        bubbleAlpha = bubbleAlpha,
         onClick = {
             if (isPlaying) {
                 mediaPlayer?.let {
@@ -1813,11 +1822,11 @@ internal fun VoiceMessageBubble(
             }
         },
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 4.dp)
+        ) {
                 // 细线播放/暂停图标 (比 HugeIcons 实心圆更精致)
                 VoicePlayIcon(
                     isPlaying = isPlaying,
@@ -1854,7 +1863,6 @@ internal fun VoiceMessageBubble(
                     color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.onSecondaryContainer,
                 )
-            }
         }
     }
 }
