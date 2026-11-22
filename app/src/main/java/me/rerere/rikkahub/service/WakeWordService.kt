@@ -203,7 +203,7 @@ class WakeWordService : Service(), KoinComponent {
                 Log.i(TAG, "唤醒引擎就绪: ${setting.wakeWord}")
                 // 昵称可能在运行中被改: 引擎重建后同步刷新常驻通知文案
                 runCatching {
-                    NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, buildNotification(setting))
+                    NotificationManagerCompat.from(this@WakeWordService).notify(NOTIFICATION_ID, buildNotification(setting))
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "唤醒引擎初始化失败: ${e.message}", e)
