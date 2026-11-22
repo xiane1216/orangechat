@@ -237,7 +237,7 @@ fun ChatInput(
     val mainScope = rememberCoroutineScope()
     val senseVoiceReady = remember { mutableStateOf(senseVoiceManager.isModelReady()) }
     var localRecorder by remember { mutableStateOf<me.rerere.rikkahub.data.voice.LocalVoiceRecorder?>(null) }
-    var usingLocalRecorder by remember { mutableStateOf(false) }
+    var usingCloudAsr by remember { mutableStateOf(false) }
     // 下载进度监听 (模型首次下载时更新 pill 文案)
     LaunchedEffect(Unit) {
         senseVoiceManager.downloadState.collect { st ->
@@ -295,11 +295,19 @@ fun ChatInput(
     }
 
     // Handle voice message completion
-    // 松手后: 停止录音 -> 本地 SenseVoice 提取语气/声音事件 (云端转写为空时兜底文字) -> 回调发送
-    suspend fun finalizeVoiceMessage(path: String, cloudTranscript: String) {
+    // 松手后: 停止双录音 -> 等云端转写收尾(若在用) -> 本地 SenseVoice 提取语气/声音事件 -> 回调发送
+    suspend fun finalizeVoiceMessage(path: String, cloudUsed: Boolean) {
         var emotion = ""
         var events = ""
-        var transcript = cloudTranscript
+        var transcript = ""
+        // 云端转写收尾: 等 controller 回到 Idle (最后一段 flush 完成, transcript 稳定), 最多等 4s
+        if (cloudUsed) {
+            val deadline = System.currentTimeMillis() + 4000
+            while (System.currentTimeMillis() < deadline && asrState.status != ASRStatus.Idle) {
+                delay(150)
+            }
+            transcript = asrState.transcript
+        }
         val wavFile = java.io.File(path)
         if (senseVoiceReady.value && !isVoiceCallActive) {
             runCatching {
@@ -310,18 +318,8 @@ fun ChatInput(
             }.onFailure { Log.w("ChatInput", "sensevoice recognize failed", it) }
         }
         // durationMs 上游从未赋值恒为 0, 从 WAV 头兜底计算秒数
-        val durationSec = if (asrState.durationMs > 0 && !usingLocalRecorder) asrState.durationMs
-        else runCatching { senseVoiceManager.wavDurationSec(wavFile) }.getOrDefault(0L)
+        val durationSec = runCatching { senseVoiceManager.wavDurationSec(wavFile) }.getOrDefault(0L)
         onVoiceMessage?.invoke(path, durationSec, transcript, emotion, events)
-    }
-
-    LaunchedEffect(asrState.audioFilePath, voiceMessageMode) {
-        if (voiceMessageMode && asrState.audioFilePath != null && asrState.status == ASRStatus.Idle) {
-            val path = asrState.audioFilePath!!
-            val cloudTranscript = asrState.transcript
-            finalizeVoiceMessage(path, cloudTranscript)
-            voiceMessageMode = false
-        }
     }
 
     // 首次使用按住说话: 本地情绪识别模型下载确认 (约228MB, 仅一次, 本地离线运行)
@@ -802,30 +800,29 @@ fun ChatInput(
                                                                 showModelDownloadDialog = true
                                                             }
                                                             else -> {
-                                                                // 云端 ASR 可能未配置 (start 会抛异常), 失败时走本地录音兜底
-                                                                var started = false
+                                                                // 双录音设计: 云端 ASR 只管转文字(不留存文件),
+                                                                // 本地录音器留存 WAV 供气泡回放+情绪识别
+                                                                voiceMessageMode = true
+                                                                var cloudStarted = false
                                                                 try {
-                                                                    voiceMessageMode = true
                                                                     asr.start { }
-                                                                    started = true
+                                                                    cloudStarted = true
                                                                 } catch (e: Exception) {
-                                                                    Log.w("ChatInput", "cloud asr start failed, fallback to local recorder", e)
+                                                                    Log.w("ChatInput", "cloud asr start failed, local only", e)
                                                                 }
-                                                                if (started) {
-                                                                    usingLocalRecorder = false
+                                                                val rec = me.rerere.rikkahub.data.voice.LocalVoiceRecorder(context)
+                                                                if (rec.start()) {
+                                                                    localRecorder = rec
+                                                                    usingCloudAsr = cloudStarted
+                                                                    pressing = true
+                                                                    recordSecs = 0
+                                                                } else if (cloudStarted) {
+                                                                    // 本地留存失败, 退回仅云端 (asrState 收尾链)
+                                                                    asr.stop()
                                                                     pressing = true
                                                                     recordSecs = 0
                                                                 } else {
-                                                                    val rec = me.rerere.rikkahub.data.voice.LocalVoiceRecorder(context)
-                                                                    if (rec.start()) {
-                                                                        voiceMessageMode = true
-                                                                        localRecorder = rec
-                                                                        usingLocalRecorder = true
-                                                                        pressing = true
-                                                                        recordSecs = 0
-                                                                    } else {
-                                                                        voiceMessageMode = false
-                                                                    }
+                                                                    voiceMessageMode = false
                                                                 }
                                                             }
                                                         }
@@ -833,19 +830,29 @@ fun ChatInput(
                                                     waitForUpOrCancellation()
                                                     if (pressing) {
                                                         pressing = false
-                                                        if (usingLocalRecorder) {
-                                                            // 本地录音: 手动收尾 (不经过 asrState)
-                                                            val path = localRecorder?.stop()
-                                                            localRecorder = null
-                                                            usingLocalRecorder = false
-                                                            if (path != null && voiceMessageMode) {
-                                                                val p = path
-                                                                mainScope.launch { finalizeVoiceMessage(p, "") }
-                                                            }
-                                                            voiceMessageMode = false
-                                                        } else {
-                                                            asr.stop() // asrState 更新后由 LaunchedEffect 收尾
+                                                        val rec = localRecorder
+                                                        localRecorder = null
+                                                        val path = rec?.stop()
+                                                        val cloudUsed = usingCloudAsr
+                                                        usingCloudAsr = false
+                                                        if (cloudUsed) {
+                                                            asr.stop() // 触发云端最后一段 flush
                                                         }
+                                                        if (path != null && voiceMessageMode) {
+                                                            val p = path
+                                                            mainScope.launch { finalizeVoiceMessage(p, cloudUsed) }
+                                                        } else if (path == null && cloudUsed && voiceMessageMode) {
+                                                            // 仅云端模式 (本地留存失败): 等收尾后用 asrState
+                                                            mainScope.launch {
+                                                                val deadline = System.currentTimeMillis() + 4000
+                                                                while (System.currentTimeMillis() < deadline && asrState.status != ASRStatus.Idle) {
+                                                                    delay(150)
+                                                                }
+                                                                val p = asrState.audioFilePath
+                                                                if (p != null) finalizeVoiceMessage(p, false)
+                                                            }
+                                                        }
+                                                        voiceMessageMode = false
                                                     }
                                                 }
                                             }
