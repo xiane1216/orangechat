@@ -302,16 +302,27 @@ class ProactiveMessageService : KoinComponent {
         }
 
         // 最近一次亮屏使用手机的全局时刻: 统计进出前台 + 亮屏/息屏事件,
-        // 息屏那一刻即"放下手机"的时刻, 静默时长由此起算. 让 AI 判断用户是否在休息/忙碌
+        // 息屏那一刻即"放下手机"的时刻, 静默时长由此起算. 让 AI 判断用户是否在休息/忙碌.
+        // 注意: 同一应用内滚动浏览不产生任何 usage 事件, "最后事件时间"只是最后一次切换/亮灭屏,
+        // 亮屏中绝不能说"静默", 只有熄屏后才从息屏时刻起算静默
         try {
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
             val appUsageService = AppUsageService(context)
             val lastInfoResult = appUsageService.getLastActivityInfo()
             if (lastInfoResult.isSuccess) {
                 val lastInfo = lastInfoResult.getOrThrow()
                 val timeSdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                val silentMinutes = (currentTime - lastInfo.lastActivityTime) / 60000
-                val silentText = if (silentMinutes < 1) "刚刚还在用" else "已静默 ${silentMinutes}分钟"
-                sb.appendLine("最近亮屏: ${timeSdf.format(java.util.Date(lastInfo.lastActivityTime))}（$silentText）")
+                if (powerManager.isInteractive) {
+                    // 屏幕亮着 = 大概率正在看手机; 事件停更只是因为一直在同一应用内浏览(滚动不产生事件)
+                    val idleMinutes = (currentTime - lastInfo.lastActivityTime) / 60000
+                    val idleText = if (idleMinutes < 1) "刚刚" else "${idleMinutes}分钟前"
+                    sb.appendLine("屏幕状态: 亮屏中（大概率正在看手机）")
+                    sb.appendLine("最近亮屏/切换: ${timeSdf.format(java.util.Date(lastInfo.lastActivityTime))}（$idleText，此后无切换事件 = 一直在同一应用内浏览）")
+                } else {
+                    val silentMinutes = (currentTime - lastInfo.lastActivityTime) / 60000
+                    val silentText = if (silentMinutes < 1) "刚刚还在用" else "已静默 ${silentMinutes}分钟"
+                    sb.appendLine("最近亮屏: ${timeSdf.format(java.util.Date(lastInfo.lastActivityTime))}（$silentText）")
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get last screen active time", e)
