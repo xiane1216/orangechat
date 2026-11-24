@@ -275,13 +275,14 @@ class DeviceEventAiTriggerService : Service() {
      */
     private fun scheduleDebounce(defaultDelayMs: Long) {
         debounceJob?.cancel()
-        val delayMs = eventBufferMutex.withLock {
-            val first = eventBuffer.firstOrNull()?.timestamp
-            if (first == null) defaultDelayMs
-            else (defaultDelayMs.coerceAtMost(MAX_DEBOUNCE_WAIT_MS - (System.currentTimeMillis() - first)))
-                .coerceAtLeast(3_000L)
-        }
         debounceJob = serviceScope.launch {
+            // withLock 是挂起函数, 计算延迟必须放在协程里
+            val delayMs = eventBufferMutex.withLock {
+                val first = eventBuffer.firstOrNull()?.timestamp
+                if (first == null) defaultDelayMs
+                else (defaultDelayMs.coerceAtMost(MAX_DEBOUNCE_WAIT_MS - (System.currentTimeMillis() - first)))
+                    .coerceAtLeast(3_000L)
+            }
             delay(delayMs)
             triggerAiThinking()
         }
