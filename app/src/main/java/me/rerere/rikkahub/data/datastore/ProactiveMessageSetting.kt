@@ -26,4 +26,9 @@ data class ProactiveMessageSetting(
     val aggressiveDebounceSeconds: Int = 30,
     // 悬浮球：主动消息到达时以 Telegram 风格悬浮球提醒，点击直接进入聊天页
     val floatingBubbleEnabled: Boolean = false,
+    // 监测模式：监测指定应用的打开动作，稳定停留后注入一条提醒消息（AI 必回）
+    // 与激进模式共用轮询服务（DeviceEventAiTriggerService），可独立开启
+    val watchModeEnabled: Boolean = false,
+    // 监测名单（包名列表，上限 10 个，UI 和 AI 工具共同维护）
+    val watchPackages: List<String> = emptyList(),
 )

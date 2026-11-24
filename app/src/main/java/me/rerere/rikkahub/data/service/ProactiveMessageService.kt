@@ -1136,15 +1136,11 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
 
             // ---- 以下为动态内容, 全部放在末尾 ----
             if (isFromDeviceEvent) {
-                // 激进模式设备事件触发的专用提示词 + 设备事件上下文（放在最后面，网关追加内容之后模型最后看到的就是这个）
+                // 激进模式设备事件触发: 只说明触发原因与 PASS 机制, 不加行为引导
                 appendLine()
                 appendLine()
-                appendLine("## ⚠️ 当前触发原因：用户手机动向（设备事件触发）")
-                appendLine("你是因为检测到用户的手机操作动向（切换应用/亮屏锁屏/回桌面）而被触发的。")
-                appendLine("请特别注意：这是设备事件触发，不是定时主动消息。根据用户的手机操作动向来决定是否发消息。")
-                appendLine("绝对不要复述上一轮的对话内容，要发新的话题或新的关心。")
-                appendLine("请根据用户的动向，自然地决定是否主动发一条消息。距离用户上次回复已过去 $idleMinutesText。")
-                appendLine("如果你觉得现在没什么好说的，或者没什么有趣的话题，请只回复 [PASS] 即可。")
+                appendLine("## 设备事件触发")
+                appendLine("本次由检测到用户手机动向触发（距宝宝上次回复已过去 $idleMinutesText）。没什么好说的就回复 [PASS]。")
                 appendLine("[JUMP] 标记不会展示给用户，仅用于触发屏幕跳转。")
                 // 直接注入设备事件上下文
                 if (!deviceEventContext.isNullOrBlank()) {
@@ -1258,7 +1254,11 @@ class ProactiveMessageTriggerService : android.app.Service(), KoinComponent {
             addAll(localTools.getTools(assistant.localTools))
 
             // 系统工具（位置、通知、日历、闹钟、相机）
-            val systemToolsOptions = settings.systemToolsSetting.getEnabledOptions()
+            val systemToolsOptions = settings.systemToolsSetting.getEnabledOptions().toMutableSet()
+            // 监测模式开启时提供监测名单管理工具
+            if (settings.proactiveMessageSetting.watchModeEnabled) {
+                systemToolsOptions.add(me.rerere.rikkahub.data.ai.tools.SystemToolOption.AppWatchlist)
+            }
             if (systemToolsOptions.isNotEmpty()) {
                 val systemTools = SystemTools(this@ProactiveMessageTriggerService, settings)
                 addAll(systemTools.getTools(systemToolsOptions))

@@ -59,6 +59,7 @@ sealed class SystemToolOption {
     @Serializable @SerialName("app_lock") data object AppLock : SystemToolOption()
     @Serializable @SerialName("fingerprint") data object Fingerprint : SystemToolOption()
     @Serializable @SerialName("ezviz_monitor") data object EzvizMonitor : SystemToolOption()
+    @Serializable @SerialName("app_watchlist") data object AppWatchlist : SystemToolOption()
 }
 
 class SystemTools(private val context: Context, private val settings: Settings) {
@@ -395,6 +396,12 @@ class SystemTools(private val context: Context, private val settings: Settings) 
     private val storageInfoTool by lazy { createStorageInfoTool(context) }
     private val appSwitchTool by lazy { createAppSwitchTool(context) }
     private val appLockTool by lazy { createAppLockTool(context) }
+    private val appWatchlistTool by lazy {
+        createAppWatchlistTool(
+            context,
+            org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.datastore.SettingsStore>()
+        )
+    }
     private val fingerprintTool by lazy {
         me.rerere.rikkahub.data.ai.tools.local.fingerprintTool(
             context,
@@ -446,6 +453,7 @@ class SystemTools(private val context: Context, private val settings: Settings) 
         if (SystemToolOption.AppLock in enabledTools) tools.add(appLockTool)
         if (SystemToolOption.Fingerprint in enabledTools) tools.add(fingerprintTool)
         if (SystemToolOption.EzvizMonitor in enabledTools) tools.add(ezvizTool)
+        if (SystemToolOption.AppWatchlist in enabledTools) tools.add(appWatchlistTool)
         return tools
     }
 }

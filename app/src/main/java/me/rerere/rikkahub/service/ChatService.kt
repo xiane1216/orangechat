@@ -954,6 +954,10 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
                     if (settings.externalMemories.any { it.enabled }) {
                         systemToolsOptions.add(me.rerere.rikkahub.data.ai.tools.SystemToolOption.SupabaseQuery)
                     }
+                    // 监测模式开启时始终提供监测名单管理工具
+                    if (settings.proactiveMessageSetting.watchModeEnabled) {
+                        systemToolsOptions.add(me.rerere.rikkahub.data.ai.tools.SystemToolOption.AppWatchlist)
+                    }
                     if (systemToolsOptions.isNotEmpty()) {
                         val systemTools = SystemTools(context, settings)
                         addAll(systemTools.getTools(systemToolsOptions, conversation.currentMessages, filesManager))
@@ -1222,6 +1226,10 @@ addAll(localTools.getTools(assistant.localTools, me.rerere.rikkahub.data.ai.tool
                 // 如果存在启用的外置记忆库，始终启用 supabase_query 工具
                 if (settings.externalMemories.any { it.enabled }) {
                     systemToolsOptions.add(me.rerere.rikkahub.data.ai.tools.SystemToolOption.SupabaseQuery)
+                }
+                // 监测模式开启时始终提供监测名单管理工具 (与正常聊天装配保持一致, 前缀缓存才不会 miss)
+                if (settings.proactiveMessageSetting.watchModeEnabled) {
+                    systemToolsOptions.add(me.rerere.rikkahub.data.ai.tools.SystemToolOption.AppWatchlist)
                 }
                 if (systemToolsOptions.isNotEmpty()) {
                     val systemTools = SystemTools(context, settings)
