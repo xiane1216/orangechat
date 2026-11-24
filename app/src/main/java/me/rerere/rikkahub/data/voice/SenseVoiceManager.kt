@@ -196,7 +196,8 @@ class SenseVoiceManager(
      * 情绪 token 与 事件 token 映射为中文; 剩余部分为转写文字。
      */
     private fun parseSenseVoiceText(raw: String): SenseVoiceResult {
-        val tokenRegex = Regex("<\\|([A-Za-z_]+)\\|>")
+        // 闭合 token 形如 <|/Speech|>, 正则需兼容可选的 '/', 否则会残留在转写文本里
+        val tokenRegex = Regex("<\\|(/?[A-Za-z_]+)\\|>")
         val emotions = mutableListOf<String>()
         val events = mutableListOf<String>()
         for (m in tokenRegex.findAll(raw)) {
@@ -207,19 +208,24 @@ class SenseVoiceManager(
                 "SURPRISED" -> emotions.add("惊讶")
                 "FEARFUL" -> emotions.add("害怕")
                 "DISGUSTED" -> emotions.add("厌恶")
+                // NEUTRAL/EMO_UNKNOWN/OTHER = 模型没测出情绪, 保持空, 注入侧不硬说"平静"
                 "Laughter" -> events.add("笑声")
-                "Crying" -> events.add("哭声")
-                "Sigh" -> events.add("叹气")
-                "Cough" -> events.add("咳嗽")
+                "Cry" -> events.add("哭声") // 词表 token 是 Cry 不是 Crying, 旧映射永远匹配不上导致哭声被丢弃
                 "Sneeze" -> events.add("喷嚏")
+                "Breath" -> events.add("呼吸声") // 词表无叹气标签, Breath 是最接近的信号(叹气/抽泣常表现为明显呼吸声)
+                "Cough" -> events.add("咳嗽")
                 "Applause" -> events.add("掌声")
+                "Sing" -> events.add("唱歌")
                 "BGM" -> events.add("背景音乐")
             }
         }
         val text = tokenRegex.replace(raw, "").trim()
+        var emotion = emotions.firstOrNull() ?: ""
+        // 兜底: 检出哭声时情绪档却给 NEUTRAL 是模型常见误判, 哭声是更硬的证据
+        if (emotion.isBlank() && events.contains("哭声")) emotion = "难过"
         return SenseVoiceResult(
             text = text,
-            emotion = emotions.firstOrNull() ?: "",
+            emotion = emotion,
             voiceEvents = events.joinToString(","),
         )
     }

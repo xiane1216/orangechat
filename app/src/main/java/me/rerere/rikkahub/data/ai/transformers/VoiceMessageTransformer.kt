@@ -48,8 +48,8 @@ object VoiceMessageTransformer : InputMessageTransformer {
         if (part.emotion.isNotBlank()) {
             sb.append("\n语气：").append(part.emotion).append("（本地识别）")
         } else {
-            // 明确告知"听过了但平静", 避免AI不确定是否有分析
-            sb.append("\n语气：平静（本地识别未检测到明显情绪波动）")
+            // 只说"未检测到", 绝不说"平静": 没测出情绪≠用户平静, 说平静会误导AI无视文字里的情绪线索
+            sb.append("\n语气：未检测到明显情绪波动（可结合文字内容判断）")
         }
         if (part.voiceEvents.isNotBlank()) {
             sb.append("\n声音：").append(part.voiceEvents.replace(",", "、"))
