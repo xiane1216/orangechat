@@ -145,9 +145,10 @@ object WakeWordEngine {
         keywordsFile.writeText("$line\n")
 
         // 阈值语义: 越高要求关键词 token 置信度越高 -> 越难触发 (更不容易被环境声误触)
+        // 抗噪档原 0.60/2.5 实测对收音孔近讲都难以触发, 放宽到仍严于均衡但不至于喊不应
         val (threshold, score) = when (sensitivity) {
             0 -> 0.25f to 1.5f // 高灵敏
-            2 -> 0.60f to 2.5f // 抗噪
+            2 -> 0.50f to 2.2f // 抗噪
             else -> 0.45f to 2.0f // 均衡 (默认)
         }
 
