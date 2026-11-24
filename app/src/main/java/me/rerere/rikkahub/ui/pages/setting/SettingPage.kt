@@ -75,6 +75,7 @@ import me.rerere.hugeicons.stroke.Sun01
 import me.rerere.hugeicons.stroke.WavingHand01
 import me.rerere.hugeicons.stroke.MessageMultiple01
 import me.rerere.hugeicons.stroke.Message01
+import me.rerere.hugeicons.stroke.Eye
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.isNotConfigured
@@ -292,6 +293,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         leadingContent = { Icon(HugeIcons.Mic01, null) },
                         supportingContent = { Text("喊昵称唤醒 AI，自动弹出聊天页并回复（离线识别）") },
                         headlineContent = { Text("语音唤醒") },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingWatchMode) },
+                        leadingContent = { Icon(HugeIcons.Eye, null) },
+                        supportingContent = { Text("打开名单里的应用并停留几秒，AI 会收到提醒并回复你") },
+                        headlineContent = { Text("监测模式") },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAnniversary) },

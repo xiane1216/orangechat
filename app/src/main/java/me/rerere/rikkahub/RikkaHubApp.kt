@@ -165,6 +165,9 @@ class RikkaHubApp : Application() {
         // Start aggressive mode (device event AI trigger) if enabled
         startAggressiveModeIfEnabled()
 
+        // Start watch mode (watched app launch monitoring) if enabled
+        me.rerere.rikkahub.data.service.WatchModeService.startIfEnabled(this)
+
         // Reschedule daily_cron alarm if plugins need it
         rescheduleDailyCronIfEnabled()
 

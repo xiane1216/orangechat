@@ -34,15 +34,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.DEVICE_EVENT_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
-import me.rerere.rikkahub.data.repository.ConversationRepository
-import me.rerere.rikkahub.service.ChatService
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 import org.koin.core.context.GlobalContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -51,14 +45,13 @@ import java.util.Locale
 private const val TAG = "DeviceEventAiTrigger"
 
 /**
- * 激进模式 + 监测模式 共用常驻前台服务：
+ * 激进模式常驻前台服务（监测模式走独立的 WatchModeService，两者互不影响）：
  * - 监听亮屏/锁屏（ACTION_SCREEN_ON / ACTION_SCREEN_OFF 动态广播）
  * - 每 3 秒轮询 UsageStatsManager.queryEvents 检测应用切换/回桌面
- * - 激进模式: 收到事件后按用户设置的秒数防抖（批量收集），限流检查后触发 AI 思考
- * - 监测模式: 名单内应用被打开且稳定停留 5 秒后, 以用户身份注入一条监测提醒消息
- *   （chatService.sendMessage 正常聊天链路, 落库+自动回复+后台通知, 不跳转界面）
+ * - 收到事件后按用户设置的秒数防抖（批量收集），限流检查后触发 AI 思考
+ * - AI 思考复用 ProactiveMessageTriggerService 的核心逻辑
  */
-class DeviceEventAiTriggerService : Service(), KoinComponent {
+class DeviceEventAiTriggerService : Service() {
 
     companion object {
         const val NOTIFICATION_ID = 20005
@@ -67,10 +60,6 @@ class DeviceEventAiTriggerService : Service(), KoinComponent {
         private const val DEFAULT_DEBOUNCE_DELAY_MS = 30_000L
         // 防抖最长等待: 从最早未消费事件起算, 防止活跃使用时计时器被无限重置导致饥饿
         private const val MAX_DEBOUNCE_WAIT_MS = 90_000L
-        // 监测模式: 应用需稳定停留多久才触发
-        private const val WATCH_STABLE_MS = 5_000L
-        // 监测模式: 同一应用的触发冷却
-        private const val WATCH_COOLDOWN_MS = 10 * 60_000L
 
         fun startIfEnabled(context: Context) {
             try {
@@ -78,8 +67,8 @@ class DeviceEventAiTriggerService : Service(), KoinComponent {
                     val settingsStore = GlobalContext.get().get<SettingsStore>()
                     val settings = settingsStore.settingsFlowRaw.first()
                     val proactiveSetting = settings.proactiveMessageSetting
-                    // 激进模式/监测模式都可独立工作，不需要主动消息开关；两者共用本服务
-                    if (proactiveSetting.aggressiveModeEnabled || proactiveSetting.watchModeEnabled) {
+                    // 激进模式可以独立工作，不需要主动消息开关
+                    if (proactiveSetting.aggressiveModeEnabled) {
                         val intent = Intent(context, DeviceEventAiTriggerService::class.java)
                         try {
                             context.startForegroundService(intent)
@@ -106,10 +95,6 @@ class DeviceEventAiTriggerService : Service(), KoinComponent {
         }
     }
 
-    private val settingsStore: SettingsStore by inject()
-    private val chatService: ChatService by inject()
-    private val conversationRepository: ConversationRepository by inject()
-
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -122,22 +107,11 @@ class DeviceEventAiTriggerService : Service(), KoinComponent {
     private val eventBufferMutex = Mutex()
 
     // 上次轮询时记录的前台包名，用于检测切换
-    @Volatile
     private var lastForegroundPackage: String? = null
     private var lastPollTimeMs: Long = 0L
 
     // 上次 AI 思考时间，用于限流
     private var lastAiTriggerTimeMs: Long = 0L
-
-    // ---- 监测模式状态 ----
-    // 当前停留确认中的候选应用（打开后还没满 5 秒）
-    private var watchCandidatePkg: String? = null
-    private var watchStableJob: Job? = null
-    // 每个应用上次触发提醒的时间（冷却 10 分钟，内存态即可：服务被杀重建最多多提醒一次）
-    private val watchLastTriggerAt = mutableMapOf<String, Long>()
-    // 常驻通知文案（轮询循环里按当前设置刷新，通知构建读缓存值避免主线程阻塞）
-    @Volatile
-    private var notificationText: String = "AI 正在感知你的手机动向"
 
     private data class DeviceEvent(
         val type: String,        // screen_on, screen_off, app_switch, home
@@ -162,10 +136,6 @@ class DeviceEventAiTriggerService : Service(), KoinComponent {
                     val now = System.currentTimeMillis()
                     serviceScope.launch {
                         addEvent(DeviceEvent(eventType, "", "", now))
-                        if (eventType == "screen_off") {
-                            // 熄屏后不存在"停留"一说，取消未满 5 秒的监测候选
-                            cancelWatchCandidate()
-                        }
                         scheduleDebounce(getDebounceDelayMs())
                     }
                 }
@@ -256,26 +226,6 @@ class DeviceEventAiTriggerService : Service(), KoinComponent {
                                 scheduleDebounce(getDebounceDelayMs())
                             }
                             lastForegroundPackage = detectedForeground
-                        }
-
-                        // 监测模式: 前台变化时刷新候选应用（每轮都读一次设置，
-                        // 这样 UI/AI 工具改了名单后无需重启服务即可生效）
-                        val proactiveSetting = runCatching {
-                            settingsStore.settingsFlowRaw.first().proactiveMessageSetting
-                        }.getOrNull()
-                        if (proactiveSetting != null) {
-                            notificationText = when {
-                                proactiveSetting.aggressiveModeEnabled && proactiveSetting.watchModeEnabled ->
-                                    "激进模式 + 监测模式运行中（监测 ${proactiveSetting.watchPackages.size} 个应用）"
-                                proactiveSetting.watchModeEnabled ->
-                                    "监测模式运行中（监测 ${proactiveSetting.watchPackages.size} 个应用）"
-                                else -> "AI 正在感知你的手机动向"
-                            }
-                            handleForegroundChange(
-                                pkg = detectedForeground,
-                                watchEnabled = proactiveSetting.watchModeEnabled,
-                                watchPackages = proactiveSetting.watchPackages,
-                            )
                         }
                     }
                     lastPollTimeMs = now
@@ -423,89 +373,6 @@ class DeviceEventAiTriggerService : Service(), KoinComponent {
         return sb.toString()
     }
 
-    // ==================== 监测模式 ====================
-
-    /**
-     * 前台应用变化时刷新监测候选。
-     * 只盯"打开"：名单内应用进入前台后开始 5 秒停留确认，期间切走/熄屏/回桌面则取消。
-     * pkg 为 null 表示本轮轮询没有前台变化，不动候选。
-     */
-    private fun handleForegroundChange(
-        pkg: String?,
-        watchEnabled: Boolean,
-        watchPackages: List<String>,
-    ) {
-        if (pkg == null) return
-        val inList = watchEnabled &&
-            watchPackages.contains(pkg) &&
-            pkg != packageName && // 自己打开自己（AI 回复时切屏）不监测
-            !isLauncherPackage(pkg) // 回桌面不算
-        if (!inList) {
-            cancelWatchCandidate()
-            return
-        }
-        // 同一应用的重复前台事件不重置计时（轮询窗口边界可能重报）
-        if (watchCandidatePkg == pkg) return
-        watchCandidatePkg = pkg
-        watchStableJob?.cancel()
-        watchStableJob = serviceScope.launch {
-            delay(WATCH_STABLE_MS)
-            confirmAndTriggerWatch(pkg)
-        }
-        Log.d(TAG, "Watch candidate: $pkg, confirm in ${WATCH_STABLE_MS / 1000}s")
-    }
-
-    private fun cancelWatchCandidate() {
-        watchStableJob?.cancel()
-        watchStableJob = null
-        watchCandidatePkg = null
-    }
-
-    /**
-     * 停留确认到期：冷却检查后以用户身份注入一条监测提醒消息。
-     * 走正常聊天 sendMessage 链路——消息留在历史里、AI 自动回复、
-     * App 不在前台时回复完成会发系统通知；全程不跳转界面。
-     */
-    private suspend fun confirmAndTriggerWatch(pkg: String) {
-        watchCandidatePkg = null
-        try {
-            val setting = settingsStore.settingsFlowRaw.first().proactiveMessageSetting
-            if (!setting.watchModeEnabled || !setting.watchPackages.contains(pkg)) return
-            // 轮询间隙漏报的安全网: 5 秒后前台已经不是它了就不触发
-            if (lastForegroundPackage != pkg) {
-                Log.d(TAG, "Watch skip: foreground changed to $lastForegroundPackage")
-                return
-            }
-            val now = System.currentTimeMillis()
-            val last = watchLastTriggerAt[pkg] ?: 0L
-            if (now - last < WATCH_COOLDOWN_MS) {
-                Log.d(TAG, "Watch cooldown, skip $pkg (${(now - last) / 1000}s since last)")
-                return
-            }
-            watchLastTriggerAt[pkg] = now
-            val appName = getAppName(pkg)
-            Log.d(TAG, "Watch trigger: $pkg ($appName)")
-
-            val settings = settingsStore.settingsFlowRaw.first()
-            val assistant = settings.getCurrentAssistant()
-            // 当前助手最近的会话; 没有则新建（与语音唤醒一致）
-            val recent = runCatching {
-                conversationRepository.getRecentConversations(assistant.id, limit = 1).firstOrNull()
-            }.getOrNull()
-            val conversationId = recent?.id ?: kotlin.uuid.Uuid.random().also {
-                runCatching { chatService.initializeConversation(it) }
-                    .onFailure { e -> Log.e(TAG, "新建监测目标会话失败", e) }
-            }
-            // 纯事件本身, 不带任何行为引导
-            chatService.sendMessage(
-                conversationId,
-                listOf(UIMessagePart.Text("[监测提醒] 宝宝打开了「$appName」。"))
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "confirmAndTriggerWatch failed", e)
-        }
-    }
-
     private fun startForegroundCompat() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceCompat.startForeground(
@@ -528,8 +395,8 @@ class DeviceEventAiTriggerService : Service(), KoinComponent {
         )
         return NotificationCompat.Builder(this, DEVICE_EVENT_NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.small_icon)
-            .setContentTitle("感知服务运行中")
-            .setContentText(notificationText)
+            .setContentTitle("激进模式运行中")
+            .setContentText("AI 正在感知你的手机动向")
             .setContentIntent(launchPendingIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

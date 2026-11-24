@@ -262,6 +262,16 @@
         android:value="device event ai trigger for proactive messaging" />
     </service>
 
+    <!-- Watch Mode Service (monitors watched app launches, injects a reminder message) -->
+    <service
+      android:name=".data.service.WatchModeService"
+      android:exported="false"
+      android:foregroundServiceType="specialUse">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="watched app launch monitoring for proactive messaging" />
+    </service>
+
     <!-- Supabase Sync Receiver -->
     <receiver
       android:name=".data.service.SupabaseSyncReceiver"
