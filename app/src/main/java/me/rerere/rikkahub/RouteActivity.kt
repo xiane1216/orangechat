@@ -1098,6 +1098,7 @@ sealed interface Screen : NavKey {
     @Serializable
     data object SettingProactiveMessage : Screen
 
+    @Serializable
     data object SettingWatchMode : Screen
 
     @Serializable
