@@ -40,6 +40,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.VOICE_CALL_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.utils.needsTranslation
+import me.rerere.rikkahub.utils.stripTtsMarkup
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.ui.hooks.CustomAsrState
 import me.rerere.rikkahub.ui.hooks.CustomTtsState
@@ -629,11 +631,16 @@ class VoiceCallService : Service(), KoinComponent {
      * 只把"新增的完整句子"送去翻译. 这样流式期间已显示的译文不再变化,
      * 消除整段重译导致的字幕回跳/闪烁.
      */
-    private fun maybeTranslate(text: String) {
-        if (text.isBlank()) return
+    private fun maybeTranslate(rawText: String) {
+        if (rawText.isBlank()) return
         if (!_uiState.value.translationEnabled) return
-        val hasEnglish = text.any { it in 'a'..'z' || it in 'A'..'Z' }
-        if (!hasEnglish) {
+        // 先剥掉 TTS 标记 ((breath)/<#0.3#> 等):
+        // 1) 防止 "(breath)" 里的英文字母误触发翻译
+        // 2) 防止标记混进译文
+        val text = rawText.stripTtsMarkup()
+        if (text.isBlank()) return
+        // 含英文或粤语才翻译, 普通话不动
+        if (!text.needsTranslation()) {
             if (_uiState.value.assistantTranslation.isNotBlank()) {
                 _uiState.update { it.copy(assistantTranslation = "") }
             }
@@ -791,15 +798,14 @@ class VoiceCallService : Service(), KoinComponent {
      * 用于生成完成后把完整翻译存入字幕历史.
      */
     private suspend fun translateTextSync(text: String): String {
-        if (text.isBlank()) return ""
-        val hasEnglish = text.any { it in 'a'..'z' || it in 'A'..'Z' }
-        if (!hasEnglish) return ""
+        val clean = text.stripTtsMarkup()
+        if (clean.isBlank() || !clean.needsTranslation()) return ""
         return try {
             val settings = settingsStore.settingsFlow.first()
             var result = ""
             chatService.translateTextFlow(
                 settings = settings,
-                sourceText = text,
+                sourceText = clean,
                 targetLanguage = java.util.Locale.CHINESE
             ).collect { translated ->
                 result = translated

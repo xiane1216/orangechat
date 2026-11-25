@@ -130,7 +130,7 @@ private fun findProtectedRanges(text: String): List<IntRange> {
  */
 fun String.splitIntoBubbleSegments(): List<String> {
     if (isBlank()) return listOf(this)
- 
+
     val protectedRanges = findProtectedRanges(this)
     fun isProtectedIndex(index: Int) = protectedRanges.any { index in it }
  
@@ -150,7 +150,50 @@ fun String.splitIntoBubbleSegments(): List<String> {
     val result = segments
         .map { it.trim('\r').trim() }
         .filter { it.isNotBlank() }
- 
+
     return result.ifEmpty { listOf(this.trim()) }
+}
+
+// ============================================================
+// TTS 标记清洗 & 翻译触发检测
+// AI 发语音时会在文本里混入 MiniMax 合成标记 (语气/停顿/发音标注),
+// 这些标记只能给 TTS 引擎消费; 展示/翻译前必须剥掉, 否则会原样出现在
+// 翻译结果里, 还会让 "(breath)" 这类英文标签误触发英译中.
+// ============================================================
+
+/** MiniMax speech 系列支持的语气标签 (speech-2.8 官方清单) */
+private val TTS_EMO_TAG_REGEX = Regex(
+    """\((?:laughs|chuckle|coughs|clear-throat|groans|breath|pant|inhale|exhale|gasps|sniffs|sighs|snorts|burps|lip-smacking|hissing|emm|sneezes)\)""",
+    RegexOption.IGNORE_CASE,
+)
+
+/** 停顿标记: <#0.3#> */
+private val TTS_PAUSE_TAG_REGEX = Regex("""<#\d+(?:\.\d+)?#>""")
+
+/** 行内发音标注: (sung3) (he2) 等拼音/粤拼调号 */
+private val TTS_PRON_TAG_REGEX = Regex("""\([a-zA-Z]{1,8}[1-6]\)""")
+
+/** 粤语白话文高频特征字: 出现任一即视为粤语 (普通话不会用这些字) */
+private const val CANTONESE_CHARS = "喺咁嘅冇咗嚟噉嘢哋乜嘥啲冚攰係嗰啫啩喎咩嘞噃啱睇搵諗錫郁黐嚡呔"
+
+/**
+ * 剥掉文本中的 TTS 合成标记 (语气标签/停顿标记/发音标注), 返回干净的可读文本.
+ * 播放仍使用带标记的原文, 只有展示与翻译使用本函数结果.
+ */
+fun String.stripTtsMarkup(): String = this
+    .replace(TTS_PAUSE_TAG_REGEX, "")
+    .replace(TTS_EMO_TAG_REGEX, "")
+    .replace(TTS_PRON_TAG_REGEX, "")
+    .replace(Regex("""\s{2,}"""), " ")
+    .trim()
+
+/**
+ * 翻译触发检测: 含英文 (任何拉丁字母) 或粤语特征字才需要翻译.
+ * 普通话消息不翻译, 与语音通话字幕的既有行为保持一致.
+ */
+fun String.needsTranslation(): Boolean {
+    if (isBlank()) return false
+    if (any { it in 'a'..'z' || it in 'A'..'Z' }) return true
+    return any { CANTONESE_CHARS.contains(it) }
 }
  

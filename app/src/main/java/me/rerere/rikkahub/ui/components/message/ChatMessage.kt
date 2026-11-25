@@ -81,12 +81,14 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -100,8 +102,11 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import androidx.core.net.toUri
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -145,6 +150,11 @@ import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.tts.model.PlaybackStatus
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.utils.needsTranslation
+import me.rerere.rikkahub.utils.stripTtsMarkup
+import org.koin.compose.koinInject
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.HazeTint
@@ -1668,7 +1678,8 @@ private fun VoicePlayIcon(isPlaying: Boolean, color: Color, modifier: Modifier =
  * TTS 语音条 (text_to_speech 工具): v4 定稿独立消息样式,
  * 外壳与 AI 气泡完全同款 (宽度/圆角/毛玻璃/背景图/颜色/透明度全部跟随气泡设置),
  * 唯一独立的是播放键圆圈颜色 (voicePlayButtonColor, 默认思考链爱心玫瑰粉),
- * 播放走系统 TTS 引擎, 波形按文本确定性生成
+ * 播放走系统 TTS 引擎, 波形按文本确定性生成.
+ * 气泡正下方紧贴翻译小字: 内容为粤语/英文时自动翻译成普通话 (样式与消息 meta line 一致).
  */
 @Composable
 private fun TtsMessageBubble(
@@ -1702,77 +1713,148 @@ private fun TtsMessageBubble(
         ?: Color(0xFFD3A9A3)
     val idleColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
 
-    // 外壳与 AI 气泡完全同款: 毛玻璃/背景图/颜色/透明度全部跟随气泡设置
-    BubbleSurface(
-        imagePath = displaySettings.assistantBubbleImagePath,
-        cornerRadius = displaySettings.bubbleCornerRadius.dp,
-        color = displaySettings.assistantBubbleColor?.let { it.toComposeColor() }
-            ?: MaterialTheme.colorScheme.surfaceContainerHigh,
-        overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
-        bubbleAlpha = bubbleAlpha,
-        modifier = Modifier.widthIn(max = maxBubbleWidth),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(playColor)
-                    .clickable {
-                        when {
-                            playbackState.status == PlaybackStatus.Playing -> ttsState.pause()
-                            isSpeaking -> ttsState.resume()
-                            else -> ttsState.speak(text)
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (playing) HugeIcons.PauseCircle else HugeIcons.PlayCircle,
-                    contentDescription = if (playing) "Pause" else "Play",
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Canvas(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(22.dp)
-            ) {
-                val barW = 2.dp.toPx()
-                val gap = 2.5.dp.toPx()
-                val n = ((size.width + gap) / (barW + gap)).toInt().coerceIn(6, 48)
-                val playedCount = (progress * n).toInt()
-                for (i in 0 until n) {
-                    val barHeight = size.height * waveformBars[i % waveformBars.size].coerceIn(0.15f, 1f)
-                    drawRoundRect(
-                        color = if (i < playedCount) playColor else idleColor,
-                        topLeft = Offset(i * (barW + gap), (size.height - barHeight) / 2f),
-                        size = Size(barW, barHeight),
-                        cornerRadius = CornerRadius(barW / 2f, barW / 2f)
-                    )
+    // ---- 翻译行: 剥掉 (breath)/<#0.3#> 等合成标记后, 粤语/英文语音条自动翻译 ----
+    val fontSizeRatio = displaySettings.fontSizeRatio
+    val settingsStore = koinInject<SettingsStore>()
+    val chatService = koinInject<ChatService>()
+    val cleanTtsText = remember(text) { text.stripTtsMarkup() }
+    val shouldTranslate = remember(cleanTtsText) { cleanTtsText.needsTranslation() }
+    var ttsTranslation by remember(cleanTtsText) { mutableStateOf("") }
+    LaunchedEffect(cleanTtsText, shouldTranslate) {
+        if (!shouldTranslate) return@LaunchedEffect
+        TtsTranslationCache.get(cleanTtsText)?.let {
+            ttsTranslation = it
+            return@LaunchedEffect
+        }
+        try {
+            val settings = settingsStore.settingsFlow.first()
+            var last = ""
+            withContext(Dispatchers.IO) {
+                chatService.translateTextFlow(
+                    settings = settings,
+                    sourceText = cleanTtsText,
+                    targetLanguage = java.util.Locale.CHINESE,
+                ).collect { result ->
+                    last = result
+                    ttsTranslation = result
                 }
             }
+            if (last.isNotBlank()) TtsTranslationCache.put(cleanTtsText, last)
+        } catch (e: Exception) {
+            android.util.Log.w("TtsMessageBubble", "语音条翻译失败", e)
+        }
+    }
 
-            Spacer(modifier = Modifier.width(6.dp))
+    Column(modifier = Modifier.widthIn(max = maxBubbleWidth)) {
+        // 外壳与 AI 气泡完全同款: 毛玻璃/背景图/颜色/透明度全部跟随气泡设置
+        BubbleSurface(
+            imagePath = displaySettings.assistantBubbleImagePath,
+            cornerRadius = displaySettings.bubbleCornerRadius.dp,
+            color = displaySettings.assistantBubbleColor?.let { it.toComposeColor() }
+                ?: MaterialTheme.colorScheme.surfaceContainerHigh,
+            overlayEnabled = displaySettings.bubbleImageOverlayEnabled,
+            bubbleAlpha = bubbleAlpha,
+            modifier = Modifier.widthIn(max = maxBubbleWidth),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(playColor)
+                        .clickable {
+                            when {
+                                playbackState.status == PlaybackStatus.Playing -> ttsState.pause()
+                                isSpeaking -> ttsState.resume()
+                                else -> ttsState.speak(text)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (playing) HugeIcons.PauseCircle else HugeIcons.PlayCircle,
+                        contentDescription = if (playing) "Pause" else "Play",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
 
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Canvas(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(22.dp)
+                ) {
+                    val barW = 2.dp.toPx()
+                    val gap = 2.5.dp.toPx()
+                    val n = ((size.width + gap) / (barW + gap)).toInt().coerceIn(6, 48)
+                    val playedCount = (progress * n).toInt()
+                    for (i in 0 until n) {
+                        val barHeight = size.height * waveformBars[i % waveformBars.size].coerceIn(0.15f, 1f)
+                        drawRoundRect(
+                            color = if (i < playedCount) playColor else idleColor,
+                            topLeft = Offset(i * (barW + gap), (size.height - barHeight) / 2f),
+                            size = Size(barW, barHeight),
+                            cornerRadius = CornerRadius(barW / 2f, barW / 2f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                Text(
+                    text = String.format(
+                        java.util.Locale.US, "%d:%02d", displaySec / 60, displaySec % 60
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.width(34.dp),
+                    textAlign = TextAlign.End
+                )
+            }
+        }
+
+        // 翻译小字: 紧贴语音条气泡正下方, 字号/粗细/颜色与「称呼 · 时间」meta line 完全一致,
+        // 宽度不超过语音条气泡, 超宽自动换行
+        if (shouldTranslate && ttsTranslation.isNotBlank()) {
             Text(
-                text = String.format(
-                    java.util.Locale.US, "%d:%02d", displaySec / 60, displaySec % 60
-                ),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                fontSize = 12.sp,
-                modifier = Modifier.width(34.dp),
-                textAlign = TextAlign.End
+                text = buildAnnotatedString {
+                    withStyle(
+                        SpanStyle(
+                            color = playColor,
+                            fontSize = 8.sp * fontSizeRatio,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    ) { append("译 ") }
+                    append(ttsTranslation)
+                },
+                fontSize = 9.sp * fontSizeRatio,
+                lineHeight = 14.sp * fontSizeRatio,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier
+                    .padding(start = 4.dp, top = 2.dp)
+                    .widthIn(max = maxBubbleWidth),
             )
         }
+    }
+}
+
+/** 语音条翻译缓存: 清洗后原文 -> 译文, 避免 LazyList 滚动回收后重复翻译 */
+private object TtsTranslationCache {
+    private val map = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private const val MAX = 64
+
+    fun get(key: String): String? = map[key]
+
+    fun put(key: String, value: String) {
+        if (key.isBlank() || value.isBlank()) return
+        if (map.size >= MAX) map.clear()
+        map[key] = value
     }
 }
 

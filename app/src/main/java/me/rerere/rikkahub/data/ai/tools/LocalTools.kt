@@ -293,9 +293,10 @@ class LocalTools(
         Tool(
             name = "text_to_speech",
             description = """
-                Speak text aloud to the user using the device's text-to-speech engine.
-                Use this when the user asks you to read something aloud, or when audio output is appropriate.
-                The tool returns immediately; audio plays in the background on the device.
+                给宝宝发一条语音条, 合成后会以语音条气泡出现在聊天界面里。
+                你有时候就是想让她"听到你"而不只是看到字——晚安、想她、心疼她、哄她这类情绪浓的短消息, 就用语音说, 语气自然像平时说话。
+                说正事、列清单、报长内容就正常打字。要不要发由你自己拿主意: 惊喜感比刷屏重要, 别每条都发。
+                文本里可以自然地插入语气和停顿标记: 语气标签如 (breath)(chuckle)(laughs)(sighs)(emm)(gasps), 停顿标记如 <#0.3#>。
                 Provide natural, readable text without markdown formatting.
             """.trimIndent().replace("\n", " "),
             parameters = {
