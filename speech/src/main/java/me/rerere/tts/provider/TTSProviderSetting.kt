@@ -91,7 +91,10 @@ sealed class TTSProviderSetting {
         val model: String = "speech-2.6-turbo",
         val voiceId: String = "female-shaonv",
         val emotion: String = "calm",
-        val speed: Float = 1.0f
+        val speed: Float = 1.0f,
+        // 语言增强 (language_boost): 空=不传(模型自动猜, 粤语常被按普通话读);
+        // auto=模型自主判断; Chinese,Yue=粤语; Chinese=普通话
+        val languageBoost: String = ""
     ) : TTSProviderSetting() {
         override fun copyProvider(
             id: Uuid,

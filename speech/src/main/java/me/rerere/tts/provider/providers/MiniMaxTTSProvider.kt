@@ -69,6 +69,11 @@ class MiniMaxTTSProvider : TTSProvider<TTSProviderSetting.MiniMax> {
                 put("emotion", providerSetting.emotion)
                 put("speed", providerSetting.speed)
             })
+            // 语言增强: 明确告诉模型按什么语言/方言发音 (粤语=Chinese,Yue),
+            // 不传时模型自行判断, 粤语文本常被错误地按普通话发音
+            if (providerSetting.languageBoost.isNotBlank()) {
+                put("language_boost", providerSetting.languageBoost)
+            }
         }
 
         Log.i(TAG, "generateSpeech: $requestBody")

@@ -452,6 +452,53 @@ private fun MiniMaxTTSConfiguration(
         }
     }
 
+    // Language Boost (语言增强: 决定按哪种语言/方言发音, 粤语音色请选 Chinese,Yue)
+    var languageBoostExpanded by remember { mutableStateOf(false) }
+    val languageBoosts = listOf(
+        "" to "不传（模型自动判断，粤语容易被读成普通话）",
+        "auto" to "auto（模型自主判断）",
+        "Chinese,Yue" to "Chinese,Yue（粤语）",
+        "Chinese" to "Chinese（普通话）"
+    )
+
+    FormItem(
+        label = { Text("语言增强") },
+        description = { Text("告诉 MiniMax 按哪种语言/方言发音。用粤语音色请选「Chinese,Yue (粤语)」；留空则模型自己猜，粤语容易读成普通话腔") }
+    ) {
+        ExposedDropdownMenuBox(
+            expanded = languageBoostExpanded,
+            onExpandedChange = { languageBoostExpanded = !languageBoostExpanded }
+        ) {
+            OutlinedTextField(
+                value = setting.languageBoost,
+                onValueChange = { newBoost ->
+                    onValueChange(setting.copy(languageBoost = newBoost))
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(MenuAnchorType.PrimaryEditable),
+                placeholder = { Text("留空 = 不传") },
+                trailingIcon = {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageBoostExpanded)
+                }
+            )
+            ExposedDropdownMenu(
+                expanded = languageBoostExpanded,
+                onDismissRequest = { languageBoostExpanded = false }
+            ) {
+                languageBoosts.forEach { (value, label) ->
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        onClick = {
+                            languageBoostExpanded = false
+                            onValueChange(setting.copy(languageBoost = value))
+                        }
+                    )
+                }
+            }
+        }
+    }
+
     // Emotion
     var emotionExpanded by remember { mutableStateOf(false) }
     val emotions = listOf("calm", "happy", "sad", "angry", "fearful", "disgusted", "surprised")
