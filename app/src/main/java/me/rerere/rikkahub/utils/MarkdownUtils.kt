@@ -173,8 +173,20 @@ private val TTS_PAUSE_TAG_REGEX = Regex("""<#\d+(?:\.\d+)?#>""")
 /** 行内发音标注: (sung3) (he2) 等拼音/粤拼调号 */
 private val TTS_PRON_TAG_REGEX = Regex("""\([a-zA-Z]{1,8}[1-6]\)""")
 
-/** 粤语白话文高频特征字: 出现任一即视为粤语 (普通话不会用这些字) */
-private const val CANTONESE_CHARS = "喺咁嘅冇咗嚟噉嘢哋乜嘥啲冚攰係嗰啫啩喎咩嘞噃啱睇搵諗錫郁黐嚡呔"
+/**
+ * 粤语白话文高频特征字 (简繁都收): 出现任一即视为粤语.
+ * 只收普通话书面语不会出现的字, 避免把普通话误判成粤语.
+ */
+private const val CANTONESE_CHARS =
+    "唔喺咁嘅冇咗嚟噉嘢哋乜嘥啲冚攰係嗰啫啩喎咩嘞噃啱睇搵谂諗錫锡郁黐攞瞓冧嬲呃畀俾嗌囉啰嚡呔喱咯佬乸噶啖喐掂劏"
+
+/** 粤语高频双字词 (字表兜底): 命中任一也视为粤语 */
+private val CANTONESE_WORDS = listOf(
+    "而家", "宜家", "点解", "點解", "点样", "點樣", "点算", "點算",
+    "唔该", "唔該", "唔好", "唔系", "唔係", "唔想", "唔知", "唔得", "唔使", "唔准",
+    "系咪", "係咪", "咁样", "咁樣", "噉样", "今次", "寻日", "尋日", "听日", "聽日",
+    "呢度", "嗰度", "边度", "邊度", "乜嘢", "搞掂", "钟意", "鍾意", "返工", "返学",
+)
 
 /**
  * 剥掉文本中的 TTS 合成标记 (语气标签/停顿标记/发音标注), 返回干净的可读文本.
@@ -188,12 +200,13 @@ fun String.stripTtsMarkup(): String = this
     .trim()
 
 /**
- * 翻译触发检测: 含英文 (任何拉丁字母) 或粤语特征字才需要翻译.
+ * 翻译触发检测: 含英文 (任何拉丁字母) 或粤语特征字/词才需要翻译.
  * 普通话消息不翻译, 与语音通话字幕的既有行为保持一致.
  */
 fun String.needsTranslation(): Boolean {
     if (isBlank()) return false
     if (any { it in 'a'..'z' || it in 'A'..'Z' }) return true
-    return any { CANTONESE_CHARS.contains(it) }
+    if (any { CANTONESE_CHARS.contains(it) }) return true
+    return CANTONESE_WORDS.any { contains(it) }
 }
  
