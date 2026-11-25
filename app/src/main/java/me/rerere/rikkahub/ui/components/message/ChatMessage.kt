@@ -43,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -1691,7 +1692,16 @@ private fun TtsMessageBubble(
     val ttsState = LocalTTSState.current
     val playbackState by ttsState.playbackState.collectAsState()
     val isSpeaking by ttsState.isSpeaking.collectAsState()
-    val playing = isSpeaking && playbackState.status == PlaybackStatus.Playing
+    val currentTag by ttsState.currentTag.collectAsState()
+    val ttsError by ttsState.error.collectAsState()
+
+    // 身份标记: 只有"正在播的是本条"时播放键才是暂停键.
+    // 修复: 共享播放队列在播任何内容时, 点语音条会误触发 pause() 导致"一点就停".
+    val myTag = remember(text) { "tts_${text.hashCode()}" }
+    val isMine = currentTag == myTag
+    val playing = isMine && isSpeaking && playbackState.status == PlaybackStatus.Playing
+    val buffering = isMine && isSpeaking && playbackState.status == PlaybackStatus.Buffering
+    val pausedMine = isMine && playbackState.status == PlaybackStatus.Paused
 
     // 时长估算: TTS 中文约 4 字/秒, 限 2~180 秒
     val estimatedSec = (text.length / 4).coerceIn(2, 180)
@@ -1779,19 +1789,27 @@ private fun TtsMessageBubble(
                         .background(playColor)
                         .clickable {
                             when {
-                                playbackState.status == PlaybackStatus.Playing -> ttsState.pause()
-                                isSpeaking -> ttsState.resume()
-                                else -> ttsState.speak(text)
+                                // 只有"正在播本条"才是暂停键; 别人的内容在播时点本条 = 重新播本条
+                                playing -> ttsState.pause()
+                                pausedMine -> ttsState.resume()
+                                else -> ttsState.speak(text, emotion = null, tag = myTag)
                             }
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = if (playing) HugeIcons.PauseCircle else HugeIcons.PlayCircle,
-                        contentDescription = if (playing) "Pause" else "Play",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    when {
+                        buffering -> CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        else -> Icon(
+                            imageVector = if (playing) HugeIcons.PauseCircle else HugeIcons.PlayCircle,
+                            contentDescription = if (playing) "Pause" else "Play",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1829,6 +1847,19 @@ private fun TtsMessageBubble(
                     textAlign = TextAlign.End
                 )
             }
+        }
+
+        // 播放失败: 合成请求失败时显示可点按的重试, 不再"闪一下就没了"
+        if (isMine && !isSpeaking && ttsError != null) {
+            Text(
+                text = "播放失败 · 点按重试",
+                fontSize = 9.sp * fontSizeRatio,
+                lineHeight = 14.sp * fontSizeRatio,
+                color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                modifier = Modifier
+                    .padding(start = 4.dp, top = 2.dp)
+                    .clickable { ttsState.speak(text, tag = myTag) },
+            )
         }
 
         // 翻译小字: 紧贴语音条气泡正下方, 字号/粗细/颜色与「称呼 · 时间」meta line 完全一致,

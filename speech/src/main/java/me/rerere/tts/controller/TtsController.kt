@@ -75,6 +75,11 @@ class TtsController(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    // 当前播放请求的身份标记: speak(tag=) 设置, 供 UI 区分"正在播的是不是本条消息"
+    // (语音条点击的播放/暂停判定不能只看全局 Playing 状态, 否则会把别人的播放误判成本条的暂停键)
+    private val _currentTag = MutableStateFlow<String?>(null)
+    val currentTag: StateFlow<String?> = _currentTag.asStateFlow()
+
     private val _currentChunk = MutableStateFlow(0)
     val currentChunk: StateFlow<Int> = _currentChunk.asStateFlow()
 
@@ -124,7 +129,8 @@ class TtsController(
         text: String,
         flush: Boolean = true,
         dedupe: Boolean = true,
-        emotion: String? = null
+        emotion: String? = null,
+        tag: String? = null
     ) {
         if (text.isBlank()) return
         val provider = currentProvider
@@ -173,6 +179,10 @@ class TtsController(
         // 修复旧版 worker 里用 queue.size 反复改小 total 导致 current > total 的显示错乱
         _totalChunks.update { allChunks.size }
         _error.update { null }
+        // 追加式调用 (flush=false, 如流式通话) 且未显式给 tag 时不清除现有标记
+        if (flush || tag != null) {
+            _currentTag.value = tag
+        }
 
         _playbackState.update {
             it.copy(
@@ -200,6 +210,7 @@ class TtsController(
         _isSpeaking.update { false }
         _currentChunk.update { 0 }
         _totalChunks.update { 0 }
+        _currentTag.value = null
         _error.update { null }
         _playbackState.update { PlaybackState(status = PlaybackStatus.Idle) }
     }
@@ -254,6 +265,7 @@ class TtsController(
         _isSpeaking.update { false }
         _currentChunk.update { 0 }
         _totalChunks.update { 0 }
+        _currentTag.value = null
         _playbackState.update { PlaybackState(status = PlaybackStatus.Idle) }
     }
 

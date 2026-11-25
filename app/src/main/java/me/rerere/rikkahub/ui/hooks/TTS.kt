@@ -88,10 +88,13 @@ interface CustomTtsState {
     val totalChunks: StateFlow<Int>
     val playbackState: StateFlow<PlaybackState>
 
+    /** 当前播放请求的身份标记 (语音条 UI 用它判断"正在播的是不是本条") */
+    val currentTag: StateFlow<String?>
+
     /** 当前播放音频的实时振幅 (0f~1f), 语音通话 AI 说话时音波起伏的数据源 */
     val audioAmplitude: StateFlow<Float>
 
-    fun speak(text: String, flushCalled: Boolean = true, emotion: String? = null)
+    fun speak(text: String, flushCalled: Boolean = true, emotion: String? = null, tag: String? = null)
     fun stop()
     fun pause()
     fun resume()
@@ -138,15 +141,16 @@ internal class CustomTtsStateImpl(
     override val currentChunk: StateFlow<Int> get() = controller.currentChunk
     override val totalChunks: StateFlow<Int> get() = controller.totalChunks
     override val playbackState: StateFlow<PlaybackState> get() = controller.playbackState
+    override val currentTag: StateFlow<String?> get() = controller.currentTag
     override val audioAmplitude: StateFlow<Float> get() = controller.audioAmplitude
 
     fun updateProvider(provider: TTSProviderSetting?) {
         controller.setProvider(provider)
     }
 
-    override fun speak(text: String, flushCalled: Boolean, emotion: String?) {
+    override fun speak(text: String, flushCalled: Boolean, emotion: String?, tag: String?) {
         val processed = text.stripMarkdown()
-        controller.speak(processed, flushCalled, emotion = emotion)
+        controller.speak(processed, flushCalled, emotion = emotion, tag = tag)
     }
 
     override fun stop() {
