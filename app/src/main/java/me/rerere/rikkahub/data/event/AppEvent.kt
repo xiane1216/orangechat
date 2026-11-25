@@ -7,7 +7,11 @@
 package me.rerere.rikkahub.data.event
 
 sealed class AppEvent {
-    data class Speak(val text: String) : AppEvent()
+    data class Speak(
+        val text: String,
+        // 情绪覆盖 (MiniMax): happy/sad/angry/fearful/disgusted/surprised, null = 用全局设置
+        val emotion: String? = null
+    ) : AppEvent()
     data class EmojiSelected(val emoji: String) : AppEvent()
 
     /**

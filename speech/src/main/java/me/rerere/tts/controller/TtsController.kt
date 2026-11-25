@@ -120,7 +120,12 @@ class TtsController(
      * - dedupe=true: 只对"尚未播放的排队内容"去重, 已播过的文字允许再次入队
      *   (重播场景传 dedupe=false)
      */
-    fun speak(text: String, flush: Boolean = true, dedupe: Boolean = true) {
+    fun speak(
+        text: String,
+        flush: Boolean = true,
+        dedupe: Boolean = true,
+        emotion: String? = null
+    ) {
         if (text.isBlank()) return
         val provider = currentProvider
         if (provider == null) {
@@ -130,6 +135,13 @@ class TtsController(
 
         val newChunks = chunker.split(text)
         if (newChunks.isEmpty()) return
+
+        // 情绪覆盖: 附加到每个分片, 合成时透传给 TTSRequest
+        val emotionedChunks = if (emotion.isNullOrBlank()) {
+            newChunks
+        } else {
+            newChunks.map { it.copy(emotion = emotion) }
+        }
 
         if (flush) {
             internalReset()
@@ -142,9 +154,9 @@ class TtsController(
         val pendingTexts = HashSet<String>()
         queue.forEach { pendingTexts.add(it.text) }
         val dedupedChunks = if (dedupe) {
-            newChunks.filter { chunk -> pendingTexts.add(chunk.text) }
+            emotionedChunks.filter { chunk -> pendingTexts.add(chunk.text) }
         } else {
-            newChunks
+            emotionedChunks
         }
         if (dedupedChunks.isEmpty()) return
 
@@ -292,7 +304,7 @@ class TtsController(
                         // 合成失败: 清掉失败的缓存结果并重试一次,
                         // 之前直接 continue 会静默丢掉这段内容 ("没读完就停了"的主因之一)
                         Log.e(TAG, "Synthesis error (first attempt), retrying", e)
-                        cache.remove(cacheKey(provider, chunk.text))
+                        cache.remove(cacheKey(provider, chunk))
                         try {
                             delay(300)
                             awaitOrCreate(chunk, provider)
@@ -335,17 +347,19 @@ class TtsController(
         for (i in begin until endExclusive) {
             val chunk = allChunks.getOrNull(i) ?: continue
             // 缓存 key 用 "provider id + 文本内容": 只合成一次, 且不受 provider 切换影响
-            cache.computeIfAbsent(cacheKey(provider, chunk.text)) {
+            cache.computeIfAbsent(cacheKey(provider, chunk)) {
                 scope.async(Dispatchers.IO) { synthesizer.synthesize(provider, chunk) }
             }
         }
         lastPrefetchedIndex = endExclusive - 1
     }
 
-    private fun cacheKey(provider: TTSProviderSetting, text: String): String = "${provider.id}:$text"
+    // 缓存 key 需包含 emotion: 同一文本不同情绪的合成结果不同
+    private fun cacheKey(provider: TTSProviderSetting, chunk: TtsChunk): String =
+        "${provider.id}:${chunk.emotion.orEmpty()}:${chunk.text}"
 
     private suspend fun awaitOrCreate(chunk: TtsChunk, provider: TTSProviderSetting): TTSResponse {
-        val deferred = cache.computeIfAbsent(cacheKey(provider, chunk.text)) {
+        val deferred = cache.computeIfAbsent(cacheKey(provider, chunk)) {
             scope.async(Dispatchers.IO) { synthesizer.synthesize(provider, chunk) }
         }
         return deferred.await()

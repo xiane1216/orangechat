@@ -296,7 +296,9 @@ class LocalTools(
                 给宝宝发一条语音条, 合成后会以语音条气泡出现在聊天界面里。
                 你有时候就是想让她"听到你"而不只是看到字——晚安、想她、心疼她、哄她这类情绪浓的短消息, 就用语音说, 语气自然像平时说话。
                 说正事、列清单、报长内容就正常打字。要不要发由你自己拿主意: 惊喜感比刷屏重要, 别每条都发。
+                可以用 emotion 参数告诉合成引擎你此刻的情绪 (happy/sad/angry/fearful/disgusted/surprised), 按消息的真实心情选, 让声音带对应情绪; 不传则自动识别。
                 文本里可以自然地插入语气和停顿标记: 语气标签如 (breath)(chuckle)(laughs)(sighs)(emm)(gasps), 停顿标记如 <#0.3#>。
+                重要: 发完语音条后, 你的文字回复要像平常聊天一样自然地继续话题, 就当只是随手发了条语音。绝对不要评论语音本身或合成效果——禁止出现"你听听""听听带不带呼吸""停顿怎么样""我加了XX标记"这类后台操作式的话, 这些技术细节宝宝看不到也不关心。
                 Provide natural, readable text without markdown formatting.
             """.trimIndent().replace("\n", " "),
             parameters = {
@@ -306,6 +308,18 @@ class LocalTools(
                             put("type", "string")
                             put("description", "The text to speak aloud")
                         })
+                        put("emotion", buildJsonObject {
+                            put("type", "string")
+                            put("enum", kotlinx.serialization.json.buildJsonArray {
+                                add("happy")
+                                add("sad")
+                                add("angry")
+                                add("fearful")
+                                add("disgusted")
+                                add("surprised")
+                            })
+                            put("description", "你此刻的情绪, 让声音带上对应的情感色彩。按消息真实心情选; 不传则自动识别")
+                        })
                     },
                     required = listOf("text")
                 )
@@ -313,7 +327,9 @@ class LocalTools(
             execute = {
                 val text = it.jsonObject["text"]?.jsonPrimitive?.contentOrNull
                     ?: error("text is required")
-                eventBus.emit(AppEvent.Speak(text))
+                val emotion = it.jsonObject["emotion"]?.jsonPrimitive?.contentOrNull
+                    ?.takeIf { e -> e.isNotBlank() }
+                eventBus.emit(AppEvent.Speak(text, emotion))
                 val payload = buildJsonObject {
                     put("success", true)
                 }

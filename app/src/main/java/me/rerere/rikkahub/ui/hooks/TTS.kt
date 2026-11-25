@@ -91,7 +91,7 @@ interface CustomTtsState {
     /** 当前播放音频的实时振幅 (0f~1f), 语音通话 AI 说话时音波起伏的数据源 */
     val audioAmplitude: StateFlow<Float>
 
-    fun speak(text: String, flushCalled: Boolean = true)
+    fun speak(text: String, flushCalled: Boolean = true, emotion: String? = null)
     fun stop()
     fun pause()
     fun resume()
@@ -144,9 +144,9 @@ internal class CustomTtsStateImpl(
         controller.setProvider(provider)
     }
 
-    override fun speak(text: String, flushCalled: Boolean) {
+    override fun speak(text: String, flushCalled: Boolean, emotion: String?) {
         val processed = text.stripMarkdown()
-        controller.speak(processed, flushCalled)
+        controller.speak(processed, flushCalled, emotion = emotion)
     }
 
     override fun stop() {

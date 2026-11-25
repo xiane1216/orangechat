@@ -66,8 +66,14 @@ class MiniMaxTTSProvider : TTSProvider<TTSProviderSetting.MiniMax> {
             })
             put("voice_setting", buildJsonObject {
                 put("voice_id", providerSetting.voiceId)
-                put("emotion", providerSetting.emotion)
                 put("speed", providerSetting.speed)
+                // 情绪: 单次请求覆盖 (AI 调工具时指定) 优先于全局设置;
+                // 两者都为空则不传该字段 -> MiniMax 服务端自动识别 (auto)
+                val emotion = request.emotion?.takeIf { it.isNotBlank() }
+                    ?: providerSetting.emotion.takeIf { it.isNotBlank() }
+                if (!emotion.isNullOrBlank()) {
+                    put("emotion", emotion)
+                }
             })
             // 语言增强: 明确告诉模型按什么语言/方言发音 (粤语=Chinese,Yue),
             // 不传时模型自行判断, 粤语文本常被错误地按普通话发音

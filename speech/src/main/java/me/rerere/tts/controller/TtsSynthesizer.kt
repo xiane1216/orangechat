@@ -28,7 +28,7 @@ class TtsSynthesizer(
         chunk: TtsChunk
     ): TTSResponse = withContext(Dispatchers.IO) {
         collectToResponse(
-            ttsManager.generateSpeech(setting, TTSRequest(text = chunk.text))
+            ttsManager.generateSpeech(setting, TTSRequest(text = chunk.text, emotion = chunk.emotion))
         )
     }
 

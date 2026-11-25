@@ -10,7 +10,9 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class TTSRequest(
-    val text: String
+    val text: String,
+    // 本次合成的情绪覆盖 (MiniMax): null/空 = 用 provider 设置里的 emotion
+    val emotion: String? = null
 )
 
 @Serializable

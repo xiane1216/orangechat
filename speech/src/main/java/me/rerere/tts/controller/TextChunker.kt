@@ -47,6 +47,8 @@ class TextChunker(
 data class TtsChunk(
     val id: java.util.UUID = java.util.UUID.randomUUID(),
     val index: Int,
-    val text: String
+    val text: String,
+    // 该分片的情绪覆盖 (透传给 TTSRequest), null = 用 provider 设置
+    val emotion: String? = null
 )
 
