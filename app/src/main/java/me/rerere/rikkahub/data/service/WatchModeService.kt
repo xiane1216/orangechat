@@ -49,7 +49,9 @@ private const val TAG = "WatchModeService"
  * 监测模式独立前台服务（与激进模式的 DeviceEventAiTriggerService 完全分开，互不影响）：
  * - 每 3 秒轮询 UsageStatsManager.queryEvents 检测前台应用变化
  * - 名单内应用被打开后开始 5 秒停留确认，期间切走/熄屏/回桌面则取消
- * - 确认停留后检查冷却（同一应用 10 分钟一次），命中则以用户身份注入
+ * - 确认停留后检查双重条件，都满足才触发：
+ *   1) 距上次提醒至少 5 分钟（绝对冷却）
+ *   2) 触发过后曾连续离开该应用超过 3 分钟（短暂切走回消息不算"重新打开"）
  *   "[监测提醒] 宝宝打开了「X」。" —— 走正常聊天 sendMessage 链路：
  *   消息留痕进历史、AI 自动回复、App 不在前台时回复完成发系统通知，全程不跳转界面
  */
@@ -60,8 +62,10 @@ class WatchModeService : Service(), KoinComponent {
         private const val POLL_INTERVAL_MS = 3000L
         // 应用需稳定停留多久才触发
         private const val WATCH_STABLE_MS = 5_000L
-        // 同一应用的触发冷却
-        private const val WATCH_COOLDOWN_MS = 10 * 60_000L
+        // 同一应用的绝对冷却（两次提醒最短间隔）
+        private const val WATCH_COOLDOWN_MS = 5 * 60_000L
+        // 触发过后，需要连续离开该应用这么久才允许再次提醒（短暂切走不算重新打开）
+        private const val WATCH_REARM_MS = 3 * 60_000L
 
         fun startIfEnabled(context: Context) {
             try {
@@ -115,8 +119,10 @@ class WatchModeService : Service(), KoinComponent {
     private var watchCandidatePkg: String? = null
     private var watchStableJob: Job? = null
 
-    // 每个应用上次触发提醒的时间（冷却 10 分钟，内存态：服务被杀重建最多多提醒一次）
+    // 每个应用上次触发提醒的时间（内存态：服务被杀重建最多多提醒一次）
     private val watchLastTriggerAt = mutableMapOf<String, Long>()
+    // 每个应用最近一次离开前台的时间（用于"离开超过 3 分钟才重新武装"）
+    private val watchLeftAt = mutableMapOf<String, Long>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -128,6 +134,8 @@ class WatchModeService : Service(), KoinComponent {
                 override fun onReceive(context: Context?, intent: Intent?) {
                     if (intent?.action == Intent.ACTION_SCREEN_OFF) {
                         cancelWatchCandidate()
+                        // 熄屏也算离开：从熄屏时刻开始计"离开时长"
+                        lastForegroundPackage?.let { watchLeftAt[it] = System.currentTimeMillis() }
                     }
                 }
             }
@@ -240,6 +248,9 @@ class WatchModeService : Service(), KoinComponent {
         watchPackages: List<String>,
     ) {
         if (pkg == null) return
+        val now = System.currentTimeMillis()
+        // 前台切到 pkg：其余名单应用都记一次"离开"，离开时长从这里起算
+        watchPackages.forEach { a -> if (a != pkg) watchLeftAt[a] = now }
         val inList = watchEnabled &&
             watchPackages.contains(pkg) &&
             pkg != packageName && // 自己（AI 回复时切屏）不监测
@@ -281,10 +292,19 @@ class WatchModeService : Service(), KoinComponent {
                 return
             }
             val now = System.currentTimeMillis()
+            // 双重条件：绝对冷却 + 触发过后需真正离开过（>3 分钟）才重新提醒
             val last = watchLastTriggerAt[pkg] ?: 0L
             if (now - last < WATCH_COOLDOWN_MS) {
                 Log.d(TAG, "Watch cooldown, skip $pkg (${(now - last) / 1000}s since last)")
                 return
+            }
+            if (last > 0L) {
+                val leftAt = watchLeftAt[pkg] ?: 0L
+                val awayFor = now - leftAt
+                if (awayFor < WATCH_REARM_MS) {
+                    Log.d(TAG, "Watch not rearmed, skip $pkg (away ${(awayFor / 1000)}s < ${WATCH_REARM_MS / 1000}s)")
+                    return
+                }
             }
             watchLastTriggerAt[pkg] = now
             val appName = getAppName(pkg)
