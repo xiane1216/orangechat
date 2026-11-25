@@ -1720,12 +1720,16 @@ private fun TtsMessageBubble(
     val cleanTtsText = remember(text) { text.stripTtsMarkup() }
     val shouldTranslate = remember(cleanTtsText) { cleanTtsText.needsTranslation() }
     var ttsTranslation by remember(cleanTtsText) { mutableStateOf("") }
-    LaunchedEffect(cleanTtsText, shouldTranslate) {
+    var ttsFailed by remember(cleanTtsText) { mutableStateOf(false) }
+    var ttsRetryKey by remember(cleanTtsText) { mutableIntStateOf(0) }
+    LaunchedEffect(cleanTtsText, shouldTranslate, ttsRetryKey) {
         if (!shouldTranslate) return@LaunchedEffect
         TtsTranslationCache.get(cleanTtsText)?.let {
             ttsTranslation = it
+            ttsFailed = false
             return@LaunchedEffect
         }
+        ttsFailed = false
         try {
             val settings = settingsStore.settingsFlow.first()
             var last = ""
@@ -1739,9 +1743,17 @@ private fun TtsMessageBubble(
                     ttsTranslation = result
                 }
             }
-            if (last.isNotBlank()) TtsTranslationCache.put(cleanTtsText, last)
+            if (last.isNotBlank()) {
+                TtsTranslationCache.put(cleanTtsText, last)
+            } else {
+                // 流正常结束但没产出译文: 大概率被翻译模型/内容审核拒绝
+                ttsTranslation = ""
+                ttsFailed = true
+            }
         } catch (e: Exception) {
             android.util.Log.w("TtsMessageBubble", "语音条翻译失败", e)
+            ttsTranslation = ""
+            ttsFailed = true
         }
     }
 
@@ -1821,7 +1833,44 @@ private fun TtsMessageBubble(
 
         // 翻译小字: 紧贴语音条气泡正下方, 字号/粗细/颜色与「称呼 · 时间」meta line 完全一致,
         // 宽度不超过语音条气泡, 超宽自动换行
-        if (shouldTranslate && ttsTranslation.isNotBlank()) {
+        if (shouldTranslate && ttsFailed) {
+            // 翻译失败: 显示可点按的重试行 (整行可点)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clickable { ttsRetryKey++ }
+                    .padding(start = 4.dp, top = 2.dp),
+            ) {
+                Text(
+                    text = "翻译失败",
+                    fontSize = 9.sp * fontSizeRatio,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Refresh03,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(10.dp),
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "点按重试",
+                            fontSize = 9.sp * fontSizeRatio,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+        } else if (shouldTranslate && ttsTranslation.isNotBlank()) {
             Text(
                 text = buildAnnotatedString {
                     withStyle(
